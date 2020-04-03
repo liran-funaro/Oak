@@ -6,8 +6,6 @@
 
 package com.oath.oak;
 
-import java.nio.ByteBuffer;
-
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -16,14 +14,20 @@ import java.util.concurrent.atomic.AtomicLong;
 class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
 
     private static class FreeChuck {
-        long id;
+        final long id;
         long length;
-        Slice slice;
+        final Slice alloc;
 
-        FreeChuck(long id, long length, Slice slice) {
+        FreeChuck(Slice alloc, long id) {
             this.id = id;
-            this.length = length;
-            this.slice = slice;
+            this.length = alloc.getAllocLength();
+            this.alloc = alloc;
+        }
+
+        FreeChuck() {
+            this.id = -1;
+            this.length = 0;
+            this.alloc = null;
         }
     }
 
@@ -88,20 +92,15 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
         allocateNewCurrentBlock();
         this.capacity = capacity;
         for (int i = 0; i < ThreadIndexCalculator.MAX_THREADS; i++) {
-            dummies[i] = new FreeChuck(-1, 0, null);
+            dummies[i] = new FreeChuck();
         }
-    }
-
-    @Deprecated
-    public ByteBuffer allocate(int size) {
-        return allocateSlice(size, MemoryManager.Allocate.KEY).getByteBuffer();
     }
 
     // Allocates ByteBuffer of the given size, either from freeList or (if it is still possible)
     // within current block bounds.
-    // Otherwise new block is allocated within Oak memory bounds. Thread safe.
+    // Otherwise, new block is allocated within Oak memory bounds. Thread safe.
     @Override
-    public Slice allocateSlice(int size, MemoryManager.Allocate allocate) {
+    public boolean allocate(Slice s, int size, MemoryManager.Allocate allocate) {
 
         FreeChuck myDummy = dummies[threadIndexCalculator.getIndex()];
         // While the free list is not empty there can be a suitable free chunk to reuse.
@@ -117,7 +116,7 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
             // If the best fit is more than REUSE_MAX_MULTIPLIER times as big than the desired length, than a new
             // buffer is allocated instead of reusing.
             // This means that currently buffers are not split, so there is some internal fragmentation.
-            if (bestFit.slice.getByteBuffer().remaining() > (REUSE_MAX_MULTIPLIER * size)) {
+            if (bestFit.alloc.getAllocLength() > (REUSE_MAX_MULTIPLIER * size)) {
                 break;     // all remaining buffers are too big
             }
             // If multiple threads got the same bestFit only one can use it (the one which succeeds in removing it
@@ -127,16 +126,21 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
                 if (stats != null) {
                     stats.reclaim(size);
                 }
-                return bestFit.slice;
+                s.copyFrom(bestFit.alloc);
+
+                // We read again the buffer so to get the per-thread buffer.
+                // TODO: This will be redundant once we eliminate the per-thread buffers.
+                readByteBuffer(s);
+                return true;
             }
         }
 
-        Slice s = null;
+        boolean isAllocated = false;
         // freeList is empty or there is no suitable slice
-        while (s == null) {
+        while (!isAllocated) {
             try {
                 // The ByteBuffer inside this slice is the thread's ByteBuffer
-                s = currentBlock.allocate(size);
+                isAllocated = currentBlock.allocate(s, size);
             } catch (OakOutOfMemoryException e) {
                 // there is no space in current block
                 // may be a buffer bigger than any block is requested?
@@ -164,30 +168,22 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
         } else {
             valuesAllocated.incrementAndGet();
         }
-        return s;
+        return true;
     }
 
     // Releases memory (makes it available for reuse) without other GC consideration.
     // Meaning this request should come while it is ensured none is using this memory.
     // Thread safe.
-    // IMPORTANT: it is assumed free will get ByteBuffers only initially allocated from this
+    // IMPORTANT: it is assumed free will get an allocation only initially allocated from this
     // Allocator!
-    @Deprecated
-    public void free(ByteBuffer bb) {
-        allocated.addAndGet(-(bb.remaining()));
-        if (stats != null) {
-            stats.release(bb);
-        }
-        freeList.add(new FreeChuck(freeCounter.getAndIncrement(), bb.remaining(), new Slice(INVALID_BLOCK_ID, bb)));
-    }
-
     @Override
-    public void freeSlice(Slice slice) {
-        allocated.addAndGet(-(slice.getByteBuffer().remaining()));
+    public void free(Slice s) {
+        int size = s.getAllocLength();
+        allocated.addAndGet(-size);
         if (stats != null) {
-            stats.release(slice.getByteBuffer());
+            stats.release(size);
         }
-        freeList.add(new FreeChuck(freeCounter.getAndIncrement(), slice.getByteBuffer().remaining(), slice));
+        freeList.add(new FreeChuck(s, freeCounter.getAndIncrement()));
     }
 
     // Releases all memory allocated for this Oak (should be used as part of the Oak destruction)
@@ -230,11 +226,11 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
 
     // When some buffer need to be read from a random block
     @Override
-    public ByteBuffer readByteBufferFromBlockID(int blockID, int bufferPosition, int bufferLength) {
-        Block b = blocksArray[blockID];
+    public void readByteBuffer(Slice s) {
+        Block b = blocksArray[s.getAllocBlockID()];
         // The returned buffer is this thread's block buffer.
         // Therefore, a thread cannot read two slices from the same block without duplicating one of them.
-        return b.getBufferForThread(bufferPosition, bufferLength);
+        b.getBufferForThread(s);
     }
 
     // used only for testing
@@ -276,10 +272,10 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
         public long releasedBytes;
         public long reclaimedBytes;
 
-        public void release(ByteBuffer bb) {
+        public void release(int size) {
             synchronized (this) {
                 releasedBuffers++;
-                releasedBytes += bb.remaining();
+                releasedBytes += size;
             }
         }
 

@@ -160,7 +160,7 @@ public class OakMap<K, V> extends AbstractMap<K, V> implements AutoCloseable, Co
     @Override
     public V remove(Object key) {
         checkKey((K) key);
-        return internalOakMap.remove((K) key, null, valueDeserializeTransformer).value;
+        return (V) internalOakMap.remove((K) key, null, valueDeserializeTransformer).value;
     }
 
     /* ------ SortedMap API methods ------ */
@@ -267,7 +267,7 @@ public class OakMap<K, V> extends AbstractMap<K, V> implements AutoCloseable, Co
         if (value == null) {
             throw new NullPointerException();
         }
-        return internalOakMap.putIfAbsent(key, value, valueDeserializeTransformer).value;
+        return (V) internalOakMap.putIfAbsent(key, value, valueDeserializeTransformer).value;
     }
 
 
