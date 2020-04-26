@@ -229,7 +229,7 @@ class ValueUtilsImpl implements ValueUtils {
     public ValueResult lockRead(Slice s) {
         int lockState;
         final int version = s.getAllocVersion();
-        assert version > Slice.INVALID_VERSION;
+        assert version > EntrySet.INVALID_VERSION;
         do {
             int oldVersion = getOffHeapVersion(s);
             if (oldVersion != version) {
@@ -254,7 +254,7 @@ class ValueUtilsImpl implements ValueUtils {
     public ValueResult unlockRead(Slice s) {
         int lockState;
         final int version = s.getAllocVersion();
-        assert version > Slice.INVALID_VERSION;
+        assert version > EntrySet.INVALID_VERSION;
         do {
             lockState = getLockState(s);
             assert lockState > MOVED.value;
@@ -266,7 +266,7 @@ class ValueUtilsImpl implements ValueUtils {
     @Override
     public ValueResult lockWrite(Slice s) {
         final int version = s.getAllocVersion();
-        assert version > Slice.INVALID_VERSION;
+        assert version > EntrySet.INVALID_VERSION;
         do {
             int oldVersion = getOffHeapVersion(s);
             if (oldVersion != version) {
@@ -295,7 +295,7 @@ class ValueUtilsImpl implements ValueUtils {
     @Override
     public ValueResult deleteValue(Slice s) {
         final int version = s.getAllocVersion();
-        assert version > Slice.INVALID_VERSION;
+        assert version > EntrySet.INVALID_VERSION;
         do {
             int oldVersion = getOffHeapVersion(s);
             if (oldVersion != version) {

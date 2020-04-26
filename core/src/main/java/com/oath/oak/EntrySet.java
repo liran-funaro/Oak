@@ -85,6 +85,7 @@ class EntrySet<K, V> {
         }
     }
 
+    public static final int INVALID_VERSION = 0;
     static final int INVALID_ENTRY_INDEX = 0;
 
     // location of the first (head) node - just a next pointer (always same value 0)
@@ -332,16 +333,14 @@ class EntrySet<K, V> {
 
         value.setReference(reference);
         boolean isValid = VALUE.decode(value, reference);
-        if (isValid) {
-            value.setAllocVersion(version);
-        }
+        value.setAllocVersion(version);
         return isValid;
     }
 
     /**
      * Atomically reads the key reference from the entry (given by entry index "ei")
      */
-    long getKeyReference(int ei) {
+    private long getKeyReference(int ei) {
         return getEntryArrayFieldLong(entryIdx2intIdx(ei), OFFSET.KEY_REFERENCE);
     }
 
@@ -392,17 +391,20 @@ class EntrySet<K, V> {
     // Memory Manager interface is via Slice, although Slices are not key/value containers in the
     // EntrySet. MM allocates/releases Slices
 
-    boolean keyLookup(ThreadContext ctx, int ei) {
+    /**
+     * Updates the key portion of the look-up context inside {@code ctx} from an entry given by entry index {@code ei}.
+     * This context can be referred to later, and might be followed up by {@code valueLookUp()}.
+     */
+    boolean keyLookUp(ThreadContext ctx, int ei) {
         ctx.entryIndex = ei;
         return readKey(ctx.key, ei);
     }
 
     /**
-     * Builds a LookUp from an entry given by entry index "ei",
-     * so this entry can be referred to later
+     * Updates the value portion of the look up context inside {@code ctx} that matches the look-up context key.
+     * Thus, {@code keyLookUp()} should be called prior to this method with the same {@code ctx} instance.
      */
     void valueLookUp(ThreadContext ctx) {
-        // Updates the lookup's version and value reference atomically
         boolean isValid = readValue(ctx.value, ctx.entryIndex);
 
         /*
@@ -424,7 +426,7 @@ class EntrySet<K, V> {
             //          middle state invalid reference, valid version
 
             // if version is negative no need to finalize delete
-            ctx.valueState = (ctx.value.getAllocVersion() < Slice.INVALID_VERSION) ?
+            ctx.valueState = (ctx.value.getAllocVersion() < INVALID_VERSION) ?
                 ThreadContext.ValueState.MARKED_DELETED :
                 ThreadContext.ValueState.MARKED_DELETED_NOT_FINALIZED;
             return;
@@ -489,6 +491,7 @@ class EntrySet<K, V> {
      */
     boolean readValue(ValueBuffer value, int ei) {
         if (ei == INVALID_ENTRY_INDEX) {
+            value.invalidate();
             return false;
         }
 
@@ -615,9 +618,8 @@ class EntrySet<K, V> {
      * @param ctx - It holds the entry to CAS, the previously written version of this entry
      *               and the value reference from which the correct version is read.
      *
-     * If returned value (version) is {@code INVALID_VERSION} it means that a CAS was not preformed.
-     * Otherwise, a positive version is returned, and it is the version written to the entry
-     * (maybe by some other thread).
+     * If the value's version is {@code INVALID_VERSION} a CAS will not not be preformed.
+     * Otherwise, a positive version is written to the entry.
      * <p>
      * Note 1: the version in the input param {@code ctx} is updated in this method to be the
      * updated one if a valid version was returned.
@@ -628,7 +630,7 @@ class EntrySet<K, V> {
     void writeValueFinish(ThreadContext ctx) {
         final int entryVersion = ctx.value.getAllocVersion();
 
-        if (entryVersion > Slice.INVALID_VERSION) { // no need to complete a thing
+        if (entryVersion > INVALID_VERSION) { // no need to complete a thing
             return;
         }
 
@@ -666,7 +668,7 @@ class EntrySet<K, V> {
      */
     boolean deleteValueFinish(ThreadContext ctx) {
         final int version = ctx.value.getAllocVersion();
-        if (version <= Slice.INVALID_VERSION) { // version is marked deleted
+        if (version <= INVALID_VERSION) { // version is marked deleted
             return false;
         }
         int indIdx = entryIdx2intIdx(ctx.entryIndex);
@@ -705,7 +707,7 @@ class EntrySet<K, V> {
         // setting the value reference to <INVALID_VALUE_REFERENCE, INVALID_VERSION>
         // TODO: should we do the following setting? Because it is to set zero on zero...
         setEntryFieldLongVolatile(intIdx, OFFSET.VALUE_REFERENCE, ReferenceCodec.INVALID_REFERENCE);
-        setEntryFieldInt(intIdx, OFFSET.VALUE_VERSION, Slice.INVALID_VERSION);
+        setEntryFieldInt(intIdx, OFFSET.VALUE_VERSION, INVALID_VERSION);
 
         writeKey(ctx, key, ei);
     }

@@ -378,7 +378,7 @@ class InternalOakMap<K, V> {
      * @return whether the caller method should restart (if a rebalance was executed).
      */
     private boolean updateVersionAfterLinking(Chunk<K, V> c, ThreadContext ctx) {
-        if (c.completeLinking(ctx) == Slice.INVALID_VERSION) {
+        if (c.completeLinking(ctx) == EntrySet.INVALID_VERSION) {
             rebalance(c);
             return true;
         }

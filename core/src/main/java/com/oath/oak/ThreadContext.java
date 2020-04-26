@@ -124,6 +124,6 @@ class ThreadContext {
      * accomplished, and needs to be accomplished.
      * */
     boolean isValueLinkFinished() {
-        return !value.isValid() || (value.version > Slice.INVALID_VERSION);
+        return !value.isValid() || (value.version > EntrySet.INVALID_VERSION);
     }
 }

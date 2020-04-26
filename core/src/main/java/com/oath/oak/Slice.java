@@ -13,7 +13,6 @@ import java.nio.ByteBuffer;
 // Represents a portion of a bigger block which is part of the underlying managed memory.
 // It is allocated via block memory allocator, and can be de-allocated later
 class Slice {
-    public static final int INVALID_VERSION = 0;
 
     protected int blockID;
     protected int offset;
@@ -38,7 +37,7 @@ class Slice {
         blockID = OakNativeMemoryAllocator.INVALID_BLOCK_ID;
         offset = -1;
         length = -1;
-        version = INVALID_VERSION;
+        version = EntrySet.INVALID_VERSION;
         buffer = null;
     }
 
@@ -56,7 +55,7 @@ class Slice {
         this.length = length;
 
         // Invalidate the buffer and version. Will be assigned by the allocator.
-        this.version = INVALID_VERSION;
+        this.version = EntrySet.INVALID_VERSION;
         this.buffer = null;
     }
 
@@ -165,6 +164,6 @@ class Slice {
     }
 
     public boolean isValidVersion() {
-        return version != INVALID_VERSION;
+        return version != EntrySet.INVALID_VERSION;
     }
 }

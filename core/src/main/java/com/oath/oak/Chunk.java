@@ -134,7 +134,7 @@ class Chunk<K, V> {
         // iterate until end of list (or key is found)
         while (curr != NONE_NEXT) {
             // compare current item's key to searched key
-            boolean isValid = entrySet.keyLookup(ctx, curr);
+            boolean isValid = entrySet.keyLookUp(ctx, curr);
             assert isValid;
             int cmp = comparator.compareKeyAndSerializedKey(key, ctx.key.getAllocByteBuffer());
             // if item's key is larger - we've exceeded our key
@@ -184,7 +184,7 @@ class Chunk<K, V> {
             return ctx.value.getAllocVersion();
         }
         if (!publish()) {
-            return Slice.INVALID_VERSION;
+            return EntrySet.INVALID_VERSION;
         }
         try {
             entrySet.writeValueFinish(ctx);
@@ -243,7 +243,7 @@ class Chunk<K, V> {
     }
 
     boolean keyLookUp(ThreadContext ctx, int ei) {
-        return entrySet.keyLookup(ctx, ei);
+        return entrySet.keyLookUp(ctx, ei);
     }
 
     void valueLookUp(ThreadContext ctx) {
