@@ -179,7 +179,7 @@ class Chunk<K, V> {
      * returned.
      */
     int completeLinking(ThreadContext ctx) {
-        if (!ctx.isDeleteValueFinishNeeded() && ctx.isValueLinkFinished()) {
+        if (!ctx.isValueLinkNeeded()) {
             // the version written in lookup is a good one!
             return ctx.value.getAllocVersion();
         }

@@ -408,16 +408,24 @@ class EntrySet<K, V> {
             ctx.valueState = (ctx.value.getAllocVersion() < INVALID_VERSION) ?
                 ThreadContext.ValueState.MARKED_DELETED :
                 ThreadContext.ValueState.MARKED_DELETED_NOT_FINALIZED;
-            return;
-        }
-
-        ValueUtils.ValueResult result = valOffHeapOperator.isValueDeleted(ctx.value);
-        if (result == TRUE) {
-            // There is a deleted value associated with the given key
-            ctx.valueState = ThreadContext.ValueState.MARKED_DELETED_NOT_FINALIZED;
+        } else if (ctx.value.getAllocVersion() <= INVALID_VERSION) {
+            /*
+             * When value is connected to entry, first the value reference is CASed to the new one and after
+             * the value version is set to the new one (written off-heap). Inside entry, when value reference
+             * is invalid its version can only be invalid (0) or negative. When value reference is valid and
+             * its version is either invalid (0) or negative, the insertion or deletion of the entry wasn't
+             * accomplished, and needs to be accomplished.
+             */
+            ctx.valueState = ThreadContext.ValueState.VALID_INSERT_NOT_FINALIZED;
         } else {
-            // If result == RETRY, we ignore it, since it will be discovered later down the line as well
-            ctx.valueState = ThreadContext.ValueState.VALID;
+            ValueUtils.ValueResult result = valOffHeapOperator.isValueDeleted(ctx.value);
+            if (result == TRUE) {
+                // There is a deleted value associated with the given key
+                ctx.valueState = ThreadContext.ValueState.MARKED_DELETED_NOT_FINALIZED;
+            } else {
+                // If result == RETRY, we ignore it, since it will be discovered later down the line as well
+                ctx.valueState = ThreadContext.ValueState.VALID;
+            }
         }
     }
 
@@ -607,16 +615,12 @@ class EntrySet<K, V> {
     void writeValueFinish(ThreadContext ctx) {
         final int entryVersion = ctx.value.getAllocVersion();
 
-        if (entryVersion > INVALID_VERSION) { // no need to complete a thing
-            return;
-        }
+        // This method should not be called when the value is not written yet, or deleted,
+        // or in process of being deleted.
+        assert ctx.value.isValid();
 
-        // the value is not written yet or deleted (or in process of being deleted)
-        // this method doesn't complete those things.
-        // In case the value is deleted the negative version is going to be returned
-        if (!ctx.value.isValid()) {
-            return;
-        }
+        // This method should not be called if the value is already linked
+        assert entryVersion <= INVALID_VERSION;
 
         int offHeapVersion = valOffHeapOperator.getOffHeapVersion(ctx.value);
         casEntriesArrayInt(entryIdx2intIdx(ctx.entryIndex), OFFSET.VALUE_VERSION,

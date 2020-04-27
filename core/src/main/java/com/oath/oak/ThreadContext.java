@@ -7,18 +7,18 @@ package com.oath.oak;
 class ThreadContext {
 
     enum ValueState {
-        /**
+        /*
          * The state of the value is yet to be checked.
          */
         UNKNOWN,
 
-        /**
+        /*
          * There is an entry with the given key and its value is deleted (or at least in the process of
          * being deleted, marked just off-heap).
          */
         MARKED_DELETED,
 
-        /**
+        /*
          * When entry is makred deleted, but not yet suitable to be reused.
          * Deletion consists of 3 steps: (1) mark off-heap deleted (LP),
          * (2) CAS value reference to invalid, (3) CAS value version to negative.
@@ -26,11 +26,20 @@ class ThreadContext {
          */
         MARKED_DELETED_NOT_FINALIZED,
 
-        /**
+        /*
          * There is any entry with the given key and its value is valid.
          * valueSlice is pointing to the location that is referenced by valueReference.
          */
-        VALID
+        VALID,
+
+        /*
+         * When value is connected to entry, first the value reference is CASed to the new one and after
+         * the value version is set to the new one (written off-heap). Inside entry, when value reference
+         * is invalid its version can only be invalid (0) or negative. When value reference is valid and
+         * its version is either invalid (0) or negative, the insertion or deletion of the entry wasn't
+         * accomplished, and needs to be accomplished.
+         */
+        VALID_INSERT_NOT_FINALIZED,
     }
 
     /* The index of the thread that this context belongs to */
@@ -102,7 +111,7 @@ class ThreadContext {
     }
 
     boolean isValueValid() {
-        return valueState == ValueState.VALID;
+        return valueState.ordinal() >= ValueState.VALID.ordinal();
     }
 
     /**
@@ -123,7 +132,7 @@ class ThreadContext {
      * its version is either invalid (0) or negative, the insertion or deletion of the entry wasn't
      * accomplished, and needs to be accomplished.
      * */
-    boolean isValueLinkFinished() {
-        return !value.isValid() || (value.version > EntrySet.INVALID_VERSION);
+    boolean isValueLinkNeeded() {
+        return valueState == ValueState.VALID_INSERT_NOT_FINALIZED;
     }
 }
