@@ -96,43 +96,6 @@ class EntrySet<K, V> {
 
     private static final int FIELDS = 6;  // # of fields in each item of entries array
 
-    public static class EntryBuffer extends OakAttachedReadBuffer {
-
-        protected long reference;
-
-        public EntryBuffer(int headerSize) {
-            super(headerSize);
-        }
-
-        @Override
-        void invalidate() {
-            super.invalidate();
-            reference = ReferenceCodec.INVALID_REFERENCE;
-        }
-
-        @Override
-        void copyFrom(Slice alloc) {
-            if (alloc == this) {
-                // No need to do anything if the input is this object
-                return;
-            }
-            super.copyFrom(alloc);
-            if (alloc instanceof EntryBuffer) {
-                this.reference = ((EntryBuffer) alloc).reference;
-            } else {
-                this.reference = ReferenceCodec.INVALID_REFERENCE;
-            }
-        }
-
-        long getReference() {
-            return reference;
-        }
-
-        void setReference(long reference) {
-            this.reference = reference;
-        }
-    }
-
     /**
      * Key reference structure:
      *     LSB |     offset      | length | block  | MSB
@@ -144,7 +107,7 @@ class EntrySet<K, V> {
      *   => with the current block size of 256MB, the total memory is up to 128GB
      */
     static final ReferenceCodec KEY = new ReferenceCodec(32, 16, 16);
-    public static class KeyBuffer extends EntryBuffer {
+    public static class KeyBuffer extends OakAttachedReadBuffer {
         public KeyBuffer() {
             super(0);
         }
@@ -161,9 +124,26 @@ class EntrySet<K, V> {
      *   => with the current block size of 256MB, the total memory is up to 128GB
      */
     static final ReferenceCodec VALUE = new ReferenceCodec(32, 23, 9);
-    public static class ValueBuffer extends EntryBuffer {
+    public static class ValueBuffer extends OakAttachedReadBuffer {
+        protected long reference;
+
         public ValueBuffer(int headerSize) {
             super(headerSize);
+        }
+
+        @Override
+        void invalidate() {
+            super.invalidate();
+            reference = ReferenceCodec.INVALID_REFERENCE;
+        }
+
+        void copyFrom(ValueBuffer alloc) {
+            if (alloc == this) {
+                // No need to do anything if the input is this object
+                return;
+            }
+            super.copyFrom(alloc);
+            this.reference = alloc.reference;
         }
     }
 
@@ -331,8 +311,8 @@ class EntrySet<K, V> {
             reference = getValueReference(ei);
         } while (version != getValueVersion(ei));
 
-        value.setReference(reference);
         boolean isValid = VALUE.decode(value, reference);
+        value.reference = reference;
         value.setAllocVersion(version);
         return isValid;
     }
@@ -450,12 +430,11 @@ class EntrySet<K, V> {
         int keySize = keySerializer.calculateSize(key);
         int intIdx = entryIdx2intIdx(ei);
         memoryManager.allocate(ctx.key, keySize, MemoryManager.Allocate.KEY);
-        ctx.key.setReference(KEY.encode(ctx.key));
         // byteBuffer.slice() is set so it protects us from the overwrites of the serializer
         // TODO: better serializer need to be given OakWBuffer and not ByteBuffer
         keySerializer.serialize(key, ctx.key.getAllocByteBuffer().slice());
         ctx.entryIndex = ei;
-        setEntryFieldLong(intIdx, OFFSET.KEY_REFERENCE, ctx.key.getReference());
+        setEntryFieldLong(intIdx, OFFSET.KEY_REFERENCE, KEY.encode(ctx.key));
     }
 
     /**
@@ -473,7 +452,6 @@ class EntrySet<K, V> {
         }
 
         long reference = getKeyReference(ei);
-        key.setReference(reference);
         boolean isValid = KEY.decode(key, reference);
         if (isValid) {
             memoryManager.readByteBuffer(key);
@@ -542,7 +520,7 @@ class EntrySet<K, V> {
         // The allocated slice is actually the thread's ByteBuffer moved to point to the newly
         // allocated slice. Version in time of allocation is set as part of the slice data.
         memoryManager.allocate(ctx.newValue, valueLength, MemoryManager.Allocate.VALUE);
-        ctx.newValue.setReference(VALUE.encode(ctx.newValue));
+        ctx.newValue.reference = VALUE.encode(ctx.newValue);
 
         // for value written for the first time:
         // initializing the off-heap header (version and the lock to be free)
@@ -573,8 +551,8 @@ class EntrySet<K, V> {
      */
     ValueUtils.ValueResult writeValueCommit(ThreadContext ctx) {
         // If the commit is for a new value, we already invalidated the old value reference and version.
-        long oldValueReference = ctx.value.getReference();
-        long newValueReference = ctx.newValue.getReference();
+        long oldValueReference = ctx.value.reference;
+        long newValueReference = ctx.newValue.reference;
         int oldValueVersion = ctx.value.getAllocVersion();
         int newValueVersion = ctx.newValue.getAllocVersion();
         assert newValueReference != ReferenceCodec.INVALID_REFERENCE;
@@ -677,7 +655,7 @@ class EntrySet<K, V> {
         // In order to not allow this scenario happen we must release the
         // value's off-heap slice to memory manager only after deleteValueFinish is done.
         casEntriesArrayLong(indIdx, OFFSET.VALUE_REFERENCE,
-            ctx.value.getReference(), ReferenceCodec.INVALID_REFERENCE);
+            ctx.value.reference, ReferenceCodec.INVALID_REFERENCE);
         if (casEntriesArrayInt(indIdx, OFFSET.VALUE_VERSION, version, -version)) {
             numOfEntries.getAndDecrement();
             // release the slice
