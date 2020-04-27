@@ -75,8 +75,7 @@ class EntrySet<K, V> {
          * If an entry with version v is removed, then this field is CASed to be -v after the value is marked
          * off-heap and the value reference becomes INVALID_VALUE.
          */
-        NEXT(0), KEY_REFERENCE(1), KEY_LENGTH(2), VALUE_REFERENCE(3), VALUE_LENGTH(4),
-        VALUE_VERSION(5);
+        NEXT(0), KEY_REFERENCE(1), VALUE_REFERENCE(3), VALUE_VERSION(5);
 
         final int value;
 
