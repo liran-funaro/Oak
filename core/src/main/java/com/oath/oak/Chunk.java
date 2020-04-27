@@ -39,6 +39,8 @@ class Chunk<K, V> {
     // defaults
     public static final int MAX_ITEMS_DEFAULT = 4096;
 
+    /*-------------- Members --------------*/
+
     private static final Unsafe unsafe = UnsafeUtils.unsafe;
     ByteBuffer minKey;       // minimal key that can be put in this chunk
     AtomicMarkableReference<Chunk<K, V>> next;
@@ -49,7 +51,7 @@ class Chunk<K, V> {
     // chunk can be in the following states: normal, frozen or infant(has a creator)
     private final AtomicReference<State> state;
     private AtomicReference<Rebalancer<K, V>> rebalancer;
-    private final EntrySet<K,V> entrySet;
+    private final EntrySet<K, V> entrySet;
 
     private AtomicInteger pendingOps;
 
@@ -72,9 +74,7 @@ class Chunk<K, V> {
           ValueUtils valueOperator) {
 
         this.maxItems = maxItems;
-        this.entrySet =
-            new EntrySet<K,V>(memoryManager, maxItems, keySerializer, valueSerializer,
-                valueOperator);
+        this.entrySet = new EntrySet<>(memoryManager, maxItems, keySerializer, valueSerializer, valueOperator);
         // if not zero, sorted count keeps the entry index of the last
         // subsequent and ordered entry in the entries array
         this.sortedCount = new AtomicInteger(0);
@@ -93,42 +93,118 @@ class Chunk<K, V> {
         this.externalSize = externalSize;
     }
 
-    /*-------------- Methods --------------*/
 
-    void release() {
-        // try to change the state
-        state.compareAndSet(State.FROZEN, State.RELEASED);
+    /********************************************************************************************/
+    /*-----------------------------  Wrappers for EntrySet methods -----------------------------*/
+
+    /** See {@code EntrySet.isValueRefValid} for more information */
+    boolean isValueRefValid(int ei) {
+        return entrySet.isValueRefValid(ei);
     }
 
+    /** See {@code EntrySet.keyLookUp} for more information */
+    boolean keyLookUp(ThreadContext ctx, int ei) {
+        return entrySet.keyLookUp(ctx, ei);
+    }
+
+    /** See {@code EntrySet.valueLookUp} for more information */
+    void valueLookUp(ThreadContext ctx) {
+        entrySet.valueLookUp(ctx);
+    }
+
+    /** See {@code EntrySet.readKey} for more information */
+    boolean readKeyFromEntryIndex(EntrySet.KeyBuffer key, int ei) {
+        return entrySet.readKey(key, ei);
+    }
+
+    /** See {@code EntrySet.readValue} for more information */
+    boolean readValueFromEntryIndex(EntrySet.ValueBuffer value, int ei) {
+        return entrySet.readValue(value, ei);
+    }
+
+    /** See {@code EntrySet.allocateEntry} for more information */
+    void allocateEntryAndKey(ThreadContext ctx, K key) {
+        entrySet.allocateEntry(ctx, key);
+    }
+
+    /** See {@code EntrySet.writeValueStart} for more information */
+    void writeValue(ThreadContext ctx, V value, boolean writeForMove) {
+        entrySet.writeValueStart(ctx, value, writeForMove);
+    }
+
+    /** See {@code EntrySet.releaseKey} for more information */
+    void releaseKey(ThreadContext ctx) {
+        entrySet.releaseKey(ctx);
+    }
+
+    /** See {@code EntrySet.releaseNewValue} for more information */
+    void releaseNewValue(ThreadContext ctx) {
+        entrySet.releaseNewValue(ctx);
+    }
+
+    /**
+     * @param key a key buffer to be updated with the minimal key
+     * @return    true if successful
+     */
     boolean readMinKey(EntrySet.KeyBuffer key) {
         return entrySet.readKey(key, entrySet.getHeadNextIndex());
     }
 
+    /**
+     * @param key a key buffer to be updated with the maximal key
+     * @return    true if successful
+     */
     boolean readMaxKey(EntrySet.KeyBuffer key) {
-        int maxEntry = getLastItemEntryIndex();
-        return entrySet.readKey(key, maxEntry);
+        return entrySet.readKey(key, getLastItemEntryIndex());
     }
 
     /**
-     * look up key
+     * @return the index of the first item in the chunk
+     * See {@code EntrySet.getHeadNextIndex} for more information.
+     */
+    final int getFirstItemEntryIndex() {
+        return entrySet.getHeadNextIndex();
+    }
+
+    /**
+     * Finds the last sorted entry.
+     * @return the last sorted entry
+     */
+    private int getLastItemEntryIndex() {
+        int sortedCount = this.sortedCount.get();
+        int entryIndex = sortedCount == 0 ? entrySet.getHeadNextIndex() : sortedCount;
+        int nextEntryIndex = entrySet.getNextEntryIndex(entryIndex);
+        while (nextEntryIndex != NONE_NEXT) {
+            entryIndex = nextEntryIndex;
+            nextEntryIndex = entrySet.getNextEntryIndex(entryIndex);
+        }
+        return entryIndex;
+    }
+
+
+    /********************************************************************************************/
+    /*-----------------------  Methods for looking up item in this chunk -----------------------*/
+
+    /**
+     * look up a key
      *
-     * @param ctx a context object to update with the results
+     * @param ctx the context that will follow the operation following this key lookup.
+     *            The ctx will describe the condition of the value associated with {@code key}.
+     *            If {@code (ctx.isKeyValid() && ctx.isValueValid()) == True}, the key and value was found.
+     *            If {@code ctx.isKeyValid() == False}, there is no entry with that key in this chunk.
+     *            Otherwise, if {@code ctx.isValueValid() == False}, it means that there is an entry with that key.
+     *            It can be reused in case of {@code put}, but there is no value attached to this key.
+     *            It can happen if this entry is in the midst of being inserted, or some thread removed this key and no
+     *            rebalanace occurred leaving the entry in the chunk.
+     *            It means that the value is marked off-heap as deleted, but the connection between the entry and the
+     *            value was not unlinked yet.
+     *            {@code ctx.valueState} will indicate the reason.
      * @param key the key to look up
-     *
-     * The ctx will describe the condition of the value associated with {@code key}.
-     * If {@code (ctx.isKeyValid() && ctx.isValueValid()) == True}, the key and value was found.
-     * If {@code ctx.isKeyValid() == False}, there is no entry with that key in this chunk.
-     * Otherwise, if {@code lookup.isValueValid() == False}, it means that there is an entry with that key (can be
-     * reused in case
-     * of {@code put}, but there is no value attached to this key (it can happen if this entry is in the midst of
-     * being inserted, or some thread removed this key and no rebalanace occurred leaving the entry in the chunk).
-     * It means that the value is marked off-heap as deleted, but the connection between the entry and the value was not unlinked yet.
-     * {@code ctx.valueState} will indicate the reason.
      */
     void lookUp(ThreadContext ctx, K key) {
         // binary search sorted part of key array to quickly find node to start search at
         // it finds previous-to-key
-        int curr = binaryFind(ctx.key, key);
+        int curr = binaryFind(ctx.tempKey, key);
         curr = (curr == NONE_NEXT) ? entrySet.getHeadNextIndex() : entrySet.getNextEntryIndex(curr);
 
         // iterate until end of list (or key is found)
@@ -159,116 +235,18 @@ class Chunk<K, V> {
     }
 
     /**
-     * This function completes the insertion (or deletion) of a value to Entry. When inserting a
-     * value, the value reference is CASed inside the entry first and only afterwards the version is
-     * CASed. Thus, there can be a time in which the value reference is valid but the version is
-     * INVALID_VERSION or a negative one. In this function, the version is CASed to complete the
-     * insertion.
-     * <p>
-     * The version written to entry is the version written in the off-heap memory. There is no worry
-     * of concurrent removals since these removals will have to first call this function as well,
-     * and they eventually change the version as well.
-     *
-     * @param ctx - It holds the entry to CAS, the value version written in this entry and the
-     *               value reference from which the correct version can be read.
-     * @return a version is returned.
-     * If it is {@code INVALID_VERSION} it means that a CAS was not preformed. Otherwise, a positive version is
-     * returned, and it the version written to the entry (maybe by some other thread).
-     * <p>
-     * Note that the version in the input param {@code ctx} is updated to be the right one if a valid version was
-     * returned.
-     */
-    int completeLinking(ThreadContext ctx) {
-        if (!ctx.isValueLinkNeeded()) {
-            // the version written in lookup is a good one!
-            return ctx.value.getAllocVersion();
-        }
-        if (!publish()) {
-            return EntrySet.INVALID_VERSION;
-        }
-        try {
-            entrySet.writeValueFinish(ctx);
-        } finally {
-            unpublish();
-        }
-
-        return ctx.value.getAllocVersion();
-    }
-
-    /**
-     * As written in {@code writeValueFinish(LookUp)}, when changing an entry, the value reference is CASed first and
-     * later the value version, and the same applies when removing a value. However, there is another step before
-     * changing an entry to remove a value and it is marking the value off-heap (the LP). This function is used to
-     * first CAS the value reference to {@code INVALID_VALUE_REFERENCE} and then CAS the version to be a negative one.
-     * Other threads seeing a marked value call this function before they proceed (e.g., before performing a
-     * successful {@code putIfAbsent}).
-     *
-     * @param ctx - holds the entry to change, the old value reference to CAS out, and the current value version.
-     * @return {@code true} if a rebalance is needed
-     */
-    boolean finalizeDeletion(ThreadContext ctx) {
-
-        if (!ctx.isDeleteValueFinishNeeded()) {
-            return false;
-        }
-        if (!publish()) {
-            return true;
-        }
-        try {
-            if (!entrySet.deleteValueFinish(ctx)) {
-                return false;
-            }
-            externalSize.decrementAndGet();
-            statistics.decrementAddedCount();
-            return false;
-        } finally {
-            unpublish();
-        }
-    }
-
-    // Release context's key, currently not in use, waiting for GC to be arranged
-    void releaseKey(ThreadContext ctx) {
-        entrySet.releaseKey(ctx);
-    }
-
-    // Release context's newly allocated value
-    void releaseNewValue(ThreadContext ctx) {
-        entrySet.releaseNewValue(ctx);
-    }
-
-    // Check if value reference is valid. Doesn't check further than that
-    // (meaning whether the underlined off-heap is marked deleted or version is negative)
-    boolean isValueRefValid(int ei) {
-      return entrySet.isValueRefValid(ei);
-    }
-
-    boolean keyLookUp(ThreadContext ctx, int ei) {
-        return entrySet.keyLookUp(ctx, ei);
-    }
-
-    void valueLookUp(ThreadContext ctx) {
-        entrySet.valueLookUp(ctx);
-    }
-
-    boolean readKeyFromEntryIndex(EntrySet.KeyBuffer key, int ei) {
-        return entrySet.readKey(key, ei);
-    }
-
-    boolean readValueFromEntryIndex(EntrySet.ValueBuffer value, int ei) {
-        return entrySet.readValue(value, ei);
-    }
-
-    /**
      * binary search for largest-entry smaller than 'key' in sorted part of key array.
      *
-     * @return the index of the entry from which to start a linear search -
+     * @param tempKey a reusable buffer object for internal temporary usage
+     * @param key     the key to look up
+     * @return        the index of the entry from which to start a linear search -
      * if key is found, its previous entry is returned!
      * In cases when search from the head is needed, meaning:
      * (1) the given key is less or equal than the smallest key in the chunk OR
      * (2) entries are unsorted so there is a need to start from the beginning of the linked list
      * NONE_NEXT is going to be returned
      */
-    private int binaryFind(EntrySet.KeyBuffer keyBuff, K key) {
+    private int binaryFind(EntrySet.KeyBuffer tempKey, K key) {
         int sortedCount = this.sortedCount.get();
         // if there are no sorted keys, return the head entry for a regular linear search
         if (sortedCount == 0) {
@@ -276,16 +254,16 @@ class Chunk<K, V> {
         }
 
         int headIdx = entrySet.getHeadNextIndex();
-        entrySet.readKey(keyBuff, headIdx);
+        entrySet.readKey(tempKey, headIdx);
         // if the first item is already larger than key,
         // return the head entry for a regular linear search
-        if (comparator.compareKeyAndSerializedKey(key, keyBuff.getAllocByteBuffer()) <= 0) {
+        if (comparator.compareKeyAndSerializedKey(key, tempKey.getAllocByteBuffer()) <= 0) {
             return NONE_NEXT;
         }
 
         // optimization: compare with last key to avoid binary search (here sortedCount is not zero)
-        entrySet.readKey(keyBuff, sortedCount);
-        if (comparator.compareKeyAndSerializedKey(key, keyBuff.getAllocByteBuffer()) > 0) {
+        entrySet.readKey(tempKey, sortedCount);
+        if (comparator.compareKeyAndSerializedKey(key, tempKey.getAllocByteBuffer()) > 0) {
             return sortedCount;
         }
 
@@ -293,8 +271,8 @@ class Chunk<K, V> {
         int end = sortedCount;
         while (end - start > 1) {
             int curr = start + (end - start) / 2;
-            entrySet.readKey(keyBuff, curr);
-            if (comparator.compareKeyAndSerializedKey(key, keyBuff.getAllocByteBuffer()) <= 0) {
+            entrySet.readKey(tempKey, curr);
+            if (comparator.compareKeyAndSerializedKey(key, tempKey.getAllocByteBuffer()) <= 0) {
                 end = curr;
             } else {
                 start = curr;
@@ -303,6 +281,10 @@ class Chunk<K, V> {
 
         return start;
     }
+
+
+    /********************************************************************************************/
+    /*--------- Methods for managing the write/remove path of the keys and values  -------------*/
 
     /**
      * publish operation into thread array
@@ -328,10 +310,81 @@ class Chunk<K, V> {
         pendingOps.decrementAndGet();
     }
 
-    void allocateEntryAndKey(ThreadContext ctx, K key) {
-        entrySet.allocateEntry(ctx, key);
+    /**
+     * This function completes the insertion (or deletion) of a value to Entry. When inserting a
+     * value, the value reference is CASed inside the entry first and only afterwards the version is
+     * CASed. Thus, there can be a time in which the value reference is valid but the version is
+     * INVALID_VERSION or a negative one. In this function, the version is CASed to complete the
+     * insertion.
+     * <p>
+     * The version written to entry is the version written in the off-heap memory. There is no worry
+     * of concurrent removals since these removals will have to first call this function as well,
+     * and they eventually change the version as well.
+     *
+     * @param ctx The context that follows the operation since the key was found/created.
+     *            It holds the entry to CAS, the value version written in this entry and the
+     *            value reference from which the correct version can be read.
+     * @return a version is returned.
+     * If it is {@code INVALID_VERSION} it means that a CAS was not preformed. Otherwise, a positive version is
+     * returned, and it the version written to the entry (maybe by some other thread).
+     * <p>
+     * Note that the version in the input param {@code ctx} is updated to be the right one if a valid version was
+     * returned.
+     */
+    int completeLinking(ThreadContext ctx) {
+        if (!ctx.isValueLinkNeeded()) {
+            // the version written in lookup is a good one!
+            return ctx.value.getAllocVersion();
+        }
+        if (!publish()) {
+            return EntrySet.INVALID_VERSION;
+        }
+        try {
+            entrySet.writeValueFinish(ctx);
+        } finally {
+            unpublish();
+        }
+
+        return ctx.value.getAllocVersion();
     }
 
+    /**
+     * As written in {@code writeValueFinish(ctx)}, when changing an entry, the value reference is CASed first and
+     * later the value version, and the same applies when removing a value. However, there is another step before
+     * changing an entry to remove a value and it is marking the value off-heap (the LP). This function is used to
+     * first CAS the value reference to {@code INVALID_VALUE_REFERENCE} and then CAS the version to be a negative one.
+     * Other threads seeing a marked value call this function before they proceed (e.g., before performing a
+     * successful {@code putIfAbsent()}).
+     *
+     * @param ctx The context that follows the operation since the key was found/created.
+     *            Holds the entry to change, the old value reference to CAS out, and the current value version.
+     * @return    true if a rebalance is needed
+     */
+    boolean finalizeDeletion(ThreadContext ctx) {
+        if (!ctx.isDeleteValueFinishNeeded()) {
+            return false;
+        }
+        if (!publish()) {
+            return true;
+        }
+        try {
+            if (!entrySet.deleteValueFinish(ctx)) {
+                return false;
+            }
+            externalSize.decrementAndGet();
+            statistics.decrementAddedCount();
+            return false;
+        } finally {
+            unpublish();
+        }
+    }
+
+    /**
+     * @param ctx the context that follows the operation since the key was found/created
+     * @param key the key to link
+     * @return    The previous entry index if the key was already added by another thread.
+     *            Otherwise, if successful, it will return the current entry index.
+     */
     int linkEntry(ThreadContext ctx, K key) {
         int prev, curr, cmp;
         int anchor = INVALID_ANCHOR_INDEX;
@@ -406,29 +459,14 @@ class Chunk<K, V> {
     }
 
     /**
-     * write value off-heap, promoted to EntrySet.
-     *
-     * @param ctx to be used later in the writeValueCommit
-     * @param value the value to write off-heap
-     * @param writeForMove
-     **/
-    void writeValue(ThreadContext ctx, V value, boolean writeForMove) {
-        entrySet.writeValueStart(ctx, value, writeForMove);
-    }
-
-
-    int getMaxItems() {
-        return maxItems;
-    }
-
-    /**
      * This function does the physical CAS of the value reference, which is the LP of the insertion. It then tries to
-     * complete the insertion (@see #writeValueFinish(LookUp)).
+     * complete the insertion @see writeValueFinish(ctx).
      * This is also the only place in which the size of Oak is updated.
      *
-     * @param ctx - holds the entry to which the value reference is linked, the old and new value references and
-     *               the old and new value versions.
-     * @return {@code true} if the value reference was CASed successfully.
+     * @param ctx The context that follows the operation since the key was found/created.
+     *            Holds the entry to which the value reference is linked, the old and new value references and
+     *            the old and new value versions.
+     * @return    true if the value reference was CASed successfully.
      */
     ValueUtils.ValueResult linkValue(ThreadContext ctx) {
         if (entrySet.writeValueCommit(ctx) == FALSE) {
@@ -444,87 +482,16 @@ class Chunk<K, V> {
     }
 
     /**
-     * Engage the chunk to a rebalancer r.
-     *
-     * @param r -- a rebalancer to engage with
-     */
-    void engage(Rebalancer<K, V> r) {
-        rebalancer.compareAndSet(null, r);
-    }
-
-    /**
-     * Checks whether the chunk is engaged with a given rebalancer.
-     *
-     * @param r -- a rebalancer object. If r is null, verifies that the chunk is not engaged to any rebalancer
-     * @return true if the chunk is engaged with r, false otherwise
-     */
-    boolean isEngaged(Rebalancer<K, V> r) {
-        return rebalancer.get() == r;
-    }
-
-    /**
-     * Fetch a rebalancer engaged with the chunk.
-     *
-     * @return rebalancer object or null if not engaged.
-     */
-    Rebalancer<K, V> getRebalancer() {
-        return rebalancer.get();
-    }
-
-    Chunk<K, V> creator() {
-        return creator.get();
-    }
-
-    State state() {
-        return state.get();
-    }
-
-    private void setState(State state) {
-        this.state.set(state);
-    }
-
-    void normalize() {
-        state.compareAndSet(State.INFANT, State.NORMAL);
-        creator.set(null);
-        // using fence so other puts can continue working immediately on this chunk
-        Chunk.unsafe.storeFence();
-    }
-
-    final int getFirstItemEntryIndex() {
-        return entrySet.getHeadNextIndex();
-    }
-
-    private int getLastItemEntryIndex() {
-        // find the last sorted entry
-        int sortedCount = this.sortedCount.get();
-        int entryIndex = sortedCount == 0 ? entrySet.getHeadNextIndex() : sortedCount;
-        int nextEntryIndex = entrySet.getNextEntryIndex(entryIndex);
-        while (nextEntryIndex != NONE_NEXT) {
-            entryIndex = nextEntryIndex;
-            nextEntryIndex = entrySet.getNextEntryIndex(entryIndex);
-        }
-        return entryIndex;
-    }
-
-    /**
-     * freezes chunk so no more changes can be done to it (marks pending items as frozen)
-     */
-    void freeze() {
-        setState(State.FROZEN); // prevent new puts to this chunk
-        while (pendingOps.get() != 0) ;
-    }
-
-    /***
      * Copies entries from srcChunk (starting srcEntryIdx) to this chunk,
      * performing entries sorting on the fly (delete entries that are removed as well).
-     * @param value -- a value buffer to be used by copyEntry()
-     * @param srcChunk -- chunk to copy from
-     * @param srcEntryIdx -- start position for copying
-     * @param maxCapacity -- max number of entries "this" chunk can contain after copy
+     * @param tempValue   a reusable buffer object for internal temporary usage
+     * @param srcChunk    chunk to copy from
+     * @param srcEntryIdx start position for copying
+     * @param maxCapacity max number of entries "this" chunk can contain after copy
      * @return entry index of next to the last copied entry (in the srcChunk),
      *              NONE_NEXT if all items were copied
      */
-    final int copyPartNoKeys(EntrySet.ValueBuffer value, Chunk<K, V> srcChunk, int srcEntryIdx, int maxCapacity) {
+    final int copyPartNoKeys(EntrySet.ValueBuffer tempValue, Chunk<K, V> srcChunk, int srcEntryIdx, int maxCapacity) {
 
         if (srcEntryIdx == NONE_NEXT) {
             return NONE_NEXT;
@@ -533,7 +500,7 @@ class Chunk<K, V> {
         // use local variables and just set the atomic variables once at the end
         int numOfEntries = entrySet.getNumOfEntries();
         // next *free* index of this entries array
-        int sortedThisEntryIndex = numOfEntries+1;
+        int sortedThisEntryIndex = numOfEntries + 1;
 
         // check that we are not beyond allowed number of entries to copy from source chunk
         if (numOfEntries >= maxCapacity) {
@@ -553,7 +520,7 @@ class Chunk<K, V> {
         // the long copy array doesn't happen since "next" needs to be updated separately.
 
         // copy entry by entry traversing the source linked list
-        while(entrySet.copyEntry(value, srcChunk.entrySet, srcEntryIdx)) {
+        while (entrySet.copyEntry(tempValue, srcChunk.entrySet, srcEntryIdx)) {
             // the source entry was either copied or disregarded as deleted
             // anyway move to next source entry (according to the linked list)
             srcEntryIdx = srcChunk.entrySet.getNextEntryIndex(srcEntryIdx);
@@ -589,6 +556,102 @@ class Chunk<K, V> {
         return srcEntryIdx; // if NONE_NEXT then we finished copying old chunk, else we reached max in new chunk
     }
 
+
+    /********************************************************************************************/
+    /*----------------------- Methods that are used by the rebalancer  -------------------------*/
+
+    int getMaxItems() {
+        return maxItems;
+    }
+
+    /**
+     * Engage the chunk to a rebalancer r.
+     *
+     * @param r -- a rebalancer to engage with
+     */
+    void engage(Rebalancer<K, V> r) {
+        rebalancer.compareAndSet(null, r);
+    }
+
+    /**
+     * Checks whether the chunk is engaged with a given rebalancer.
+     *
+     * @param r -- a rebalancer object. If r is null, verifies that the chunk is not engaged to any rebalancer
+     * @return true if the chunk is engaged with r, false otherwise
+     */
+    boolean isEngaged(Rebalancer<K, V> r) {
+        return rebalancer.get() == r;
+    }
+
+    /**
+     * Fetch a rebalancer engaged with the chunk.
+     *
+     * @return rebalancer object or null if not engaged.
+     */
+    Rebalancer<K, V> getRebalancer() {
+        return rebalancer.get();
+    }
+
+    boolean shouldRebalance() {
+        // perform actual check only in pre defined percentage of puts
+        if (ThreadLocalRandom.current().nextInt(100) > REBALANCE_PROB_PERC) {
+            return false;
+        }
+
+        // if another thread already runs rebalance -- skip it
+        if (!isEngaged(null)) {
+            return false;
+        }
+        int numOfEntries = entrySet.getNumOfEntries();
+        int numOfItems = statistics.getCompactedCount();
+        int sortedCount = this.sortedCount.get();
+        // Reasons for executing a rebalance:
+        // 1. There are no sorted keys and the total number of entries is above a certain threshold.
+        // 2. There are sorted keys, but the total number of unsorted keys is too big.
+        // 3. Out of the occupied entries, there are not enough actual items.
+        return (sortedCount == 0 && numOfEntries * MAX_ENTRIES_FACTOR > maxItems) ||
+                (sortedCount > 0 && (sortedCount * SORTED_REBALANCE_RATIO) < numOfEntries) ||
+                (numOfEntries * MAX_IDLE_ENTRIES_FACTOR > maxItems && numOfItems * MAX_IDLE_ENTRIES_FACTOR < numOfEntries);
+    }
+
+
+    /********************************************************************************************/
+    /*----------------------- Methods for managing the chunk's state  --------------------------*/
+
+    State state() {
+        return state.get();
+    }
+
+    Chunk<K, V> creator() {
+        return creator.get();
+    }
+
+    private void setState(State state) {
+        this.state.set(state);
+    }
+
+    void normalize() {
+        state.compareAndSet(State.INFANT, State.NORMAL);
+        creator.set(null);
+        // using fence so other puts can continue working immediately on this chunk
+        Chunk.unsafe.storeFence();
+    }
+
+    /**
+     * freezes chunk so no more changes can be done to it (marks pending items as frozen)
+     */
+    void freeze() {
+        setState(State.FROZEN); // prevent new puts to this chunk
+        while (pendingOps.get() != 0) ;
+    }
+
+    /**
+     * try to change the state from frozen to released
+     */
+    void release() {
+        state.compareAndSet(State.FROZEN, State.RELEASED);
+    }
+
     /**
      * marks this chunk's next pointer so this chunk is marked as deleted
      *
@@ -618,28 +681,6 @@ class Chunk<K, V> {
     }
 
 
-    boolean shouldRebalance() {
-        // perform actual check only in pre defined percentage of puts
-        if (ThreadLocalRandom.current().nextInt(100) > REBALANCE_PROB_PERC) {
-            return false;
-        }
-
-        // if another thread already runs rebalance -- skip it
-        if (!isEngaged(null)) {
-            return false;
-        }
-        int numOfEntries = entrySet.getNumOfEntries();
-        int numOfItems = statistics.getCompactedCount();
-        int sortedCount = this.sortedCount.get();
-        // Reasons for executing a rebalance:
-        // 1. There are no sorted keys and the total number of entries is above a certain threshold.
-        // 2. There are sorted keys, but the total number of unsorted keys is too big.
-        // 3. Out of the occupied entries, there are not enough actual items.
-        return (sortedCount == 0 && numOfEntries * MAX_ENTRIES_FACTOR > maxItems) ||
-                (sortedCount > 0 && (sortedCount * SORTED_REBALANCE_RATIO) < numOfEntries) ||
-                (numOfEntries * MAX_IDLE_ENTRIES_FACTOR > maxItems && numOfItems * MAX_IDLE_ENTRIES_FACTOR < numOfEntries);
-    }
-
     /*-------------- Iterators --------------*/
 
     AscendingIter ascendingIter() {
@@ -667,6 +708,7 @@ class Chunk<K, V> {
 
     interface ChunkIter {
         boolean hasNext();
+
         int next(ThreadContext ctx);
     }
 
@@ -689,7 +731,7 @@ class Chunk<K, V> {
                 compare = comparator.compareKeyAndSerializedKey(from, keyBuff.getAllocByteBuffer());
             }
             while (next != NONE_NEXT &&
-                (compare > 0 || (compare >= 0 && !inclusive) || !entrySet.isValueRefValid(next))) {
+                    (compare > 0 || (compare >= 0 && !inclusive) || !entrySet.isValueRefValid(next))) {
                 next = entrySet.getNextEntryIndex(next);
                 if (next != NONE_NEXT) {
                     entrySet.readKey(keyBuff, next);
@@ -734,7 +776,7 @@ class Chunk<K, V> {
             stack = new IntStack(entrySet.getLastEntryIndex());
             int sortedCnt = sortedCount.get();
             anchor = // this is the last sorted entry
-                (sortedCnt == 0 ? entrySet.getHeadNextIndex() : sortedCnt);
+                    (sortedCnt == 0 ? entrySet.getHeadNextIndex() : sortedCnt);
             stack.push(anchor);
             initNext(keyBuff);
         }
@@ -794,6 +836,7 @@ class Chunk<K, V> {
 
         /**
          * fill the stack
+         *
          * @param firstTimeInvocation
          */
         private void traverseLinkedList(EntrySet.KeyBuffer keyBuff, boolean firstTimeInvocation) {

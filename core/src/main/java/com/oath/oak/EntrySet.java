@@ -182,6 +182,19 @@ class EntrySet<K, V> {
         this.valOffHeapOperator = valOffHeapOperator;
     }
 
+    /**
+     * getNumOfEntries returns the number of entries allocated and not deleted for this EntrySet.
+     * Although, in case EntrySet is used as an array, nextFreeIndex is can be used to calculate
+     * number of entries, additional variable is used to support OakHash
+     */
+    int getNumOfEntries() {
+        return numOfEntries.get();
+    }
+
+    int getLastEntryIndex() {
+        return nextFreeIndex.get();
+    }
+
 
     /********************************************************************************************/
     /*---------------- Methods for setting and getting specific entry's field ------------------*/
@@ -269,10 +282,26 @@ class EntrySet<K, V> {
                 expectedLongValue, newLongValue);
     }
 
+
     /********************************************************************************************/
     /*--------------- Methods for setting and getting specific key and/or value ----------------*/
     // key or value references are the triple <blockID, position, length> encapsulated in long
     // whenever version is needed it is an additional integer
+
+    /**
+     * Atomically reads the key reference from the entry (given by entry index "ei")
+     */
+    private long getKeyReference(int ei) {
+        return getEntryArrayFieldLong(entryIdx2intIdx(ei), OFFSET.KEY_REFERENCE);
+    }
+
+    /**
+     * Atomically reads the value reference from the entry (given by entry index "ei")
+     * synchronisation with reading the value version is not ensured in this method
+     * */
+    private long getValueReference(int ei) {
+        return getEntryArrayFieldLong(entryIdx2intIdx(ei), OFFSET.VALUE_REFERENCE);
+    }
 
     /**
      * Atomically reads the value version from the entry (given by entry index "ei")
@@ -282,12 +311,16 @@ class EntrySet<K, V> {
         return getEntryArrayFieldInt(entryIdx2intIdx(ei), OFFSET.VALUE_VERSION);
     }
 
-    /**
-     * Atomically reads the value reference from the entry (given by entry index "ei")
-     * synchronisation with reading the value version is not ensured in this method
+    /*
+     * isValueRefValid is used only to check whether the value reference, which is part of the
+     * entry on entry index "ei" is valid. No version check and no off-heap value deletion mark check.
+     * Negative version is not checked, because negative version assignment will follow the
+     * invalid reference assignment.ass
+     * Pay attention that value may be deleted (value reference marked invalid) asynchronously
+     * by other thread just after this check. For the thread safety use a copy of value reference (next method.)
      * */
-    private long getValueReference(int ei) {
-        return getEntryArrayFieldLong(entryIdx2intIdx(ei), OFFSET.VALUE_REFERENCE);
+    boolean isValueRefValid(int ei) {
+        return ReferenceCodec.isValidReference(getValueReference(ei));
     }
 
     /**
@@ -316,12 +349,6 @@ class EntrySet<K, V> {
         return isValid;
     }
 
-    /**
-     * Atomically reads the key reference from the entry (given by entry index "ei")
-     */
-    private long getKeyReference(int ei) {
-        return getEntryArrayFieldLong(entryIdx2intIdx(ei), OFFSET.KEY_REFERENCE);
-    }
 
     /********************************************************************************************/
     /*------------- Methods for managing next entry indexes (package visibility) ---------------*/
@@ -365,14 +392,19 @@ class EntrySet<K, V> {
         return casEntriesArrayInt(entryIdx2intIdx(ei), OFFSET.NEXT, nextOld, nextNew);
     }
 
+
     /********************************************************************************************/
-    /*-------------- Methods for managing keys and values of a specific entry' -----------------*/
-    // Memory Manager interface is via Slice, although Slices are not key/value containers in the
-    // EntrySet. MM allocates/releases Slices
+    /*  Methods for managing the lookup context of the keys and values inside ThreadContext     */
 
     /**
      * Updates the key portion of the look-up context inside {@code ctx} from an entry given by entry index {@code ei}.
-     * This context can be referred to later, and might be followed up by {@code valueLookUp()}.
+     * The entry index (ei) is stored in the context so it can  be used later by other methods without passing the
+     * entry index explicitly as a parameter.
+     * Specifically, this call might be followed up by {@code valueLookUp(ctx)}.
+     *
+     * @param ctx the context that will follow the operation following this key lookup
+     * @param ei  the entry index to look up
+     * @return    true if the entry index has a valid key reference
      */
     boolean keyLookUp(ThreadContext ctx, int ei) {
         ctx.entryIndex = ei;
@@ -381,7 +413,9 @@ class EntrySet<K, V> {
 
     /**
      * Updates the value portion of the look up context inside {@code ctx} that matches the look-up context key.
-     * Thus, {@code keyLookUp()} should be called prior to this method with the same {@code ctx} instance.
+     * Thus, {@code keyLookUp(ctx, ei)} should be called prior to this method with the same {@code ctx} instance.
+     *
+     * @param ctx the context that was initiated by {@code keyLookUp(ctx, ei)}
      */
     void valueLookUp(ThreadContext ctx) {
         boolean isValid = readValue(ctx.value, ctx.entryIndex);
@@ -429,20 +463,9 @@ class EntrySet<K, V> {
         }
     }
 
-    /**
-     * writeKey writes given key object "key" (to off-heap) as a serialized key, referenced by entry
-     * at the entries index "ei"
-     **/
-    private void writeKey(ThreadContext ctx, K key, int ei) {
-        int keySize = keySerializer.calculateSize(key);
-        int intIdx = entryIdx2intIdx(ei);
-        memoryManager.allocate(ctx.key, keySize, MemoryManager.Allocate.KEY);
-        // byteBuffer.slice() is set so it protects us from the overwrites of the serializer
-        // TODO: better serializer need to be given OakWBuffer and not ByteBuffer
-        keySerializer.serialize(key, ctx.key.getAllocByteBuffer().slice());
-        ctx.entryIndex = ei;
-        setEntryFieldLong(intIdx, OFFSET.KEY_REFERENCE, KEY.encode(ctx.key));
-    }
+
+    /********************************************************************************************/
+    /*----- Methods for managing the read path of keys and values of a specific entry' ---------*/
 
     /**
      * Reads a key from entry at the given entry index (from off-heap).
@@ -451,6 +474,10 @@ class EntrySet<K, V> {
      *   (2) entry has no key set
      * The thread-local ByteBuffer can be reused by different threads, however as long as
      * a thread is invoked the ByteBuffer is related solely to this thread.
+     *
+     * @param key the buffer that will contain the key
+     * @param ei  the entry index to read
+     * @return    true if the entry index has a valid key reference
      */
     boolean readKey(KeyBuffer key, int ei) {
         if (ei == INVALID_ENTRY_INDEX) {
@@ -473,6 +500,10 @@ class EntrySet<K, V> {
      *   (2) entry has no value set
      * The thread-local ByteBuffer can be reused by different threads, however as long as
      * a thread is invoked the ByteBuffer is related solely to this thread.
+     *
+     * @param value the buffer that will contain the value
+     * @param ei    the entry index to read
+     * @return      true if the entry index has a valid value reference
      */
     boolean readValue(ValueBuffer value, int ei) {
         if (ei == INVALID_ENTRY_INDEX) {
@@ -487,38 +518,65 @@ class EntrySet<K, V> {
         return isValid;
     }
 
+
+    /********************************************************************************************/
+    /*--------- Methods for managing the write/remove path of the keys and values  -------------*/
+
     /**
-     * Releases the key of the input context.
-     * Currently in use only for unreached keys, waiting for GC to be arranged
+     * Creates/allocates an entry for the key. An entry is always associated with a key,
+     * therefore the key is written to off-heap and associated with the entry simultaneously.
+     * The value of the new entry is set to NULL: (INVALID_VALUE_REFERENCE, INVALID_VERSION)
      *
-     * @param ctx
+     * @param ctx the context that will follow the operation following this key allocation
+     * @param key the key to write
      **/
-    void releaseKey(ThreadContext ctx) {
-        memoryManager.release(ctx.key);
+    void allocateEntry(ThreadContext ctx, K key) {
+        ctx.invalidate();
+
+        int ei = nextFreeIndex.getAndIncrement();
+        if (ei > entriesCapacity) {
+            return;
+        }
+        numOfEntries.getAndIncrement();
+
+        ctx.entryIndex = ei;
+        writeKey(ctx, key);
     }
 
     /**
-     * Releases the newly allocated value of the input context.
-     * Currently the method is used only to release an
-     * unreachable value reference, the one that was not yet attached to an entry!
-     * The method is part of EntrySet, because it cares also
-     * for writing the value before attaching it to an entry (writeValueStart/writeValueCommit)
+     * Writes given key object "key" (to off-heap) as a serialized key, referenced by entry
+     * that was set in this context ({@code ctx}).
+     *
+     * @param ctx the context that follows the operation since the key was found/created
+     * @param key the key to write
      **/
-    void releaseNewValue(ThreadContext ctx) {
-        memoryManager.release(ctx.newValue);
+    private void writeKey(ThreadContext ctx, K key) {
+        int keySize = keySerializer.calculateSize(key);
+
+        int intIdx = entryIdx2intIdx(ctx.entryIndex);
+        // key and value must be set before returned
+        // setting the value reference to <INVALID_VALUE_REFERENCE, INVALID_VERSION>
+        // TODO: should we do the following setting? Because it is to set zero on zero...
+        setEntryFieldLongVolatile(intIdx, OFFSET.VALUE_REFERENCE, ReferenceCodec.INVALID_REFERENCE);
+        setEntryFieldInt(intIdx, OFFSET.VALUE_VERSION, INVALID_VERSION);
+
+        memoryManager.allocate(ctx.key, keySize, MemoryManager.Allocate.KEY);
+        // byteBuffer.slice() is set so it protects us from the overwrites of the serializer
+        // TODO: better serializer need to be given OakWBuffer and not ByteBuffer
+        keySerializer.serialize(key, ctx.key.getAllocByteBuffer().slice());
+
+        setEntryFieldLong(intIdx, OFFSET.KEY_REFERENCE, KEY.encode(ctx.key));
     }
 
     /**
-     * writeValueStart writes value off-heap. Supposed to be for entry index "ei",
+     * Writes value off-heap. Supposed to be for entry index inside {@code ctx},
      * but this entry metadata is not updated in this method. This is an intermediate step in
-     * the process of inserting key-value pair, it will be finished with writeValueCommit.
+     * the process of inserting key-value pair, it will be finished with {@code writeValueCommit(ctx}.
      * The off-heap header is initialized in this function as well.
      *
-     * @param ctx the context that follows the operation since the key being found.
-     *               Needed here for the entry index (of the entry to be updated
-     *               when insertion of this key-value pair will be committed) and for the old version.
-     * @param value the value to write off-heap
-     * @param writeForMove
+     * @param ctx          the context that follows the operation since the key was found/created
+     * @param value        the value to write off-heap
+     * @param writeForMove true if the value will replace another value
      **/
     void writeValueStart(ThreadContext ctx, V value, boolean writeForMove) {
         // the length of the given value plus its header
@@ -552,9 +610,10 @@ class EntrySet<K, V> {
      * Point of the insertion. It then tries to complete the insertion by CASing the value's version
      * if was not yet assigned (@see #writeValueFinish(LookUp)).
      *
-     * @param ctx - holds the entry to which the value reference is linked, the old and new value
-     *                references and the old and new value versions.
-     * @return {@code true} if the value reference was CASed successfully.
+     * @param ctx The context that follows the operation since the key was found/created.
+     *            Holds the entry to which the value reference is linked, the old and new value
+     *            references and the old and new value versions.
+     * @return    TRUE if the value reference was CASed successfully.
      */
     ValueUtils.ValueResult writeValueCommit(ThreadContext ctx) {
         // If the commit is for a new value, we already invalidated the old value reference and version.
@@ -573,19 +632,6 @@ class EntrySet<K, V> {
     }
 
     /**
-     * getNumOfEntries returns the number of entries allocated and not deleted for this EntrySet.
-     * Although, in case EntrySet is used as an array, nextFreeIndex is can be used to calculate
-     * number of entries, additional variable is used to support OakHash
-     */
-    int getNumOfEntries() {
-        return numOfEntries.get();
-    }
-
-    int getLastEntryIndex() {
-        return nextFreeIndex.get();
-    }
-
-    /**
      * writeValueFinish completes the insertion of a value to Oak. When inserting a value, the value
      * reference is CASed inside the entry and only then the version is CASed. Thus, there can be a
      * time in which the entry's value version is INVALID_VERSION or a negative one. In this method,
@@ -600,8 +646,9 @@ class EntrySet<K, V> {
      * of concurrent removals since these removals will have to first call this function as well,
      * and they eventually change the version as well.
      *
-     * @param ctx - It holds the entry to CAS, the previously written version of this entry
-     *               and the value reference from which the correct version is read.
+     * @param ctx The context that follows the operation since the key was found/created.
+     *            It holds the entry to CAS, the previously written version of this entry
+     *            and the value reference from which the correct version is read.
      *
      * If the value's version is {@code INVALID_VERSION} a CAS will not not be preformed.
      * Otherwise, a positive version is written to the entry.
@@ -632,17 +679,18 @@ class EntrySet<K, V> {
      * deleteValueFinish completes the deletion of a value in Oak, by marking the value reference in
      * entry, after the on-heap value was already marked as deleted.
      *
-     * As written in {@code writeValueFinish(LookUp)}, when updating an entry, the value reference
+     * As written in {@code writeValueFinish(ctx)}, when updating an entry, the value reference
      * is CASed first and later the value version, and the same applies when removing a value.
      * However, there is another step before deleting an entry (remove a value), it is marking
      * the value off-heap (the LP).
      *
      * deleteValueFinish is used to first CAS the value reference to {@code INVALID_VALUE_REFERENCE}
      * and then CAS the version to be a negative one. Other threads seeing a value marked as deleted
-     * call this function before they proceed (e.g., before performing a successful {@code putIfAbsent}).
+     * call this function before they proceed (e.g., before performing a successful {@code putIfAbsent()}).
      *
-     * @param ctx - holds the entry to change, the old value reference to CAS out, and the current value version.
-     * @return true if the deletion indeed updated the entry to be deleted as a unique operation
+     * @param ctx The context that follows the operation since the key was found/created.
+     *            Holds the entry to change, the old value reference to CAS out, and the current value version.
+     * @return    true if the deletion indeed updated the entry to be deleted as a unique operation
      *
      * Note: updating of the entries MUST be under published operation. The invoker of this method
      * is responsible to call it inside the publish/unpublish scope.
@@ -671,47 +719,42 @@ class EntrySet<K, V> {
     }
 
     /**
-     * allocateEntry creates/allocates an entry for the key. An entry is always associated with a key,
-     * therefore the key is written to off-heap and associated with the entry simultaneously.
-     * The value of the new entry is set to NULL: <INVALID_VALUE_REFERENCE, INVALID_VERSION></>
+     * Releases the key of the input context.
+     * Currently in use only for unreached keys, waiting for GC to be arranged
+     *
+     * @param ctx the context that follows the operation since the key was found/created
      **/
-    void allocateEntry(ThreadContext ctx, K key) {
-        ctx.invalidate();
-
-        int ei = nextFreeIndex.getAndIncrement();
-        if (ei > entriesCapacity) {
-            return;
-        }
-        numOfEntries.getAndIncrement();
-        int intIdx = entryIdx2intIdx(ei);
-        // key and value must be set before returned
-        // setting the value reference to <INVALID_VALUE_REFERENCE, INVALID_VERSION>
-        // TODO: should we do the following setting? Because it is to set zero on zero...
-        setEntryFieldLongVolatile(intIdx, OFFSET.VALUE_REFERENCE, ReferenceCodec.INVALID_REFERENCE);
-        setEntryFieldInt(intIdx, OFFSET.VALUE_VERSION, INVALID_VERSION);
-
-        writeKey(ctx, key, ei);
+    void releaseKey(ThreadContext ctx) {
+        memoryManager.release(ctx.key);
     }
 
-    boolean isEntryDeleted(ValueBuffer value, int ei) {
-        boolean isValid = readValue(value, ei);
+    /**
+     * Releases the newly allocated value of the input context.
+     * Currently the method is used only to release an
+     * unreachable value reference, the one that was not yet attached to an entry!
+     * The method is part of EntrySet, because it cares also
+     * for writing the value before attaching it to an entry (writeValueStart/writeValueCommit)
+     *
+     * @param ctx the context that follows the operation since the key was found/created
+     **/
+    void releaseNewValue(ThreadContext ctx) {
+        memoryManager.release(ctx.newValue);
+    }
+
+    /**
+     * Checks if an entry is deleted (checks on-heap and off-heap).
+     * @param tempValue a reusable buffer object for internal temporary usage
+     * @param ei        the entry index to check
+     * @return          true if the entry is deleted
+     */
+    boolean isEntryDeleted(ValueBuffer tempValue, int ei) {
+        boolean isValid = readValue(tempValue, ei);
         if(!isValid) {
             return true;
         }
-        return valOffHeapOperator.isValueDeleted(value) != FALSE;
+        return valOffHeapOperator.isValueDeleted(tempValue) != FALSE;
     }
 
-    /*
-     * isValueRefValid is used only to check whether the value reference, which is part of the
-     * entry on entry index "ei" is valid. No version check and no off-heap value deletion mark check.
-     * Negative version is not checked, because negative version assignment will follow the
-     * invalid reference assignment.ass
-     * Pay attention that value may be deleted (value reference marked invalid) asynchronously
-     * by other thread just after this check. For the thread safety use a copy of value reference (next method.)
-     * */
-    boolean isValueRefValid(int ei) {
-        return ReferenceCodec.isValidReference(getValueReference(ei));
-    }
 
     /******************************************************************/
     /*
@@ -720,7 +763,6 @@ class EntrySet<K, V> {
      * next entry index via set or CAS, but does it only as a result of the user request.
      * */
 
-
     /**
      * copyEntry copies one entry from source EntrySet (at source entry index "srcEntryIdx") to this EntrySet.
      * The destination entry index is chosen according to this nextFreeIndex which is increased with
@@ -728,11 +770,14 @@ class EntrySet<K, V> {
      *
      * The next pointers of the entries are requested to be set by the user if needed.
      *
-     * @return false when this EntrySet is full
+     * @param tempValue   a reusable buffer object for internal temporary usage
+     * @param srcEntrySet another EntrySet to copy from
+     * @param srcEntryIdx the entry index to copy from {@code srcEntrySet}
+     * @return            false when this EntrySet is full
      *
      * NOT THREAD SAFE
      * */
-    boolean copyEntry(ValueBuffer value, EntrySet<K,V> srcEntrySet, int srcEntryIdx) {
+    boolean copyEntry(ValueBuffer tempValue, EntrySet<K,V> srcEntrySet, int srcEntryIdx) {
         if (srcEntryIdx == headNextIndex) {
             return false;
         }
@@ -742,7 +787,7 @@ class EntrySet<K, V> {
 
         if (destEntryIndex > entriesCapacity) {return false;}
 
-        if (srcEntrySet.isEntryDeleted(value, srcEntryIdx)) {return true;}
+        if (srcEntrySet.isEntryDeleted(tempValue, srcEntryIdx)) {return true;}
 
         // ARRAY COPY: using next as the base of the entry
         // copy both the key and the value references the value's version => 5 integers via array copy
@@ -759,6 +804,4 @@ class EntrySet<K, V> {
         numOfEntries.getAndIncrement();
         return true;
     }
-
-
 }
