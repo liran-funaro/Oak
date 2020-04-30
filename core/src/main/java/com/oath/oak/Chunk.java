@@ -284,7 +284,7 @@ class Chunk<K, V> {
 
 
     /********************************************************************************************/
-    /*--------- Methods for managing the write/remove path of the keys and values  -------------*/
+    /*---------- Methods for managing the put/remove path of the keys and values  --------------*/
 
     /**
      * publish operation into thread array
