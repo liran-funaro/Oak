@@ -8,6 +8,12 @@ package com.oath.oak;
 
 import java.util.function.Function;
 
+/**
+ * This class is used for when a detached access to the key is needed with synchronization.
+ * It extends the non-synchronized version, and changes only the transformBuffer() method to perform synchronization
+ * before any access to the data.
+ * It is used by non-stream iterators that iterate over the keys (KeyIterator and EntryIterator).
+ */
 class OakDetachedReadKeyBufferSynced extends OakDetachedReadKeyBuffer {
 
     private final MemoryManager memoryManager;

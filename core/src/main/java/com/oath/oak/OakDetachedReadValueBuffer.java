@@ -8,6 +8,10 @@ package com.oath.oak;
 
 import java.util.function.Function;
 
+/**
+ * This class is used for when a detached access to the value is needed without synchronization.
+ * It is used by stream iterators that iterate over the values (ValueStreamIterator and EntryStreamIterator).
+ */
 class OakDetachedReadValueBuffer extends OakDetachedReadKeyBuffer {
 
     final EntrySet.ValueBuffer value;

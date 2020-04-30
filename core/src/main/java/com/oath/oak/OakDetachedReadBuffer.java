@@ -10,6 +10,14 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.function.Function;
 
+/**
+ * This is an abstract class for detached buffers.
+ * A class needs to implement its two abstract, protected methods that are used
+ * internally by this abstract class.
+ *  - OakAttachedReadBuffer getAttachedBuffer()
+ *  - <T> T transformBuffer(Function<OakAttachedReadBuffer, T> transformer)
+ * See the methods documentation below for more information.
+ */
 abstract class OakDetachedReadBuffer implements OakDetachedBuffer, OakUnsafeDirectBuffer {
 
     // capacity method does not require accessing the buffer, so no need for atomic operation.
@@ -74,11 +82,17 @@ abstract class OakDetachedReadBuffer implements OakDetachedBuffer, OakUnsafeDire
 
     /**
      * Returned the inner attached buffer without any validation.
-     * Useful for when the internal buffer is not accessed.
+     * It is used internally by this abstract class for when the internal buffer is not accessed, but only the
+     * allocation attributes are used (length, capacity, offset, limit, etc.).
      */
     abstract protected OakAttachedReadBuffer getAttachedBuffer();
 
-    // Apply a transformation on the inner attached buffer atomically
+    /**
+     * Apply a transformation on the inner attached buffer atomically.
+     * It is used internally by this abstract class for when we use the internal buffer to read the data.
+     * If the child class needs synchronization before accessing the data, it should implement the synchronization
+     * in this method, surrounding the call for the transformer function.
+     */
     abstract protected <T> T transformBuffer(Function<OakAttachedReadBuffer, T> transformer);
 
     /*-------------- OakUnsafeDirectBuffer --------------*/
