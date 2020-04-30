@@ -182,6 +182,46 @@ class EntrySet<K, V> {
         this.valOffHeapOperator = valOffHeapOperator;
     }
 
+    enum ValueState {
+        /*
+         * The state of the value is yet to be checked.
+         */
+        UNKNOWN,
+
+        /*
+         * There is an entry with the given key and its value is deleted (or at least in the process of
+         * being deleted, marked just off-heap).
+         */
+        DELETED,
+
+        /*
+         * When entry is marked deleted, but not yet suitable to be reused.
+         * Deletion consists of 3 steps: (1) mark off-heap deleted (LP),
+         * (2) CAS value reference to invalid, (3) CAS value version to negative.
+         * If not all three steps are done entry can not be reused for new insertion.
+         */
+        DELETED_NOT_FINALIZED,
+
+        /*
+         * There is any entry with the given key and its value is valid.
+         * valueSlice is pointing to the location that is referenced by valueReference.
+         */
+        VALID,
+
+        /*
+         * When value is connected to entry, first the value reference is CASed to the new one and after
+         * the value version is set to the new one (written off-heap). Inside entry, when value reference
+         * is invalid its version can only be invalid (0) or negative. When value reference is valid and
+         * its version is either invalid (0) or negative, the insertion or deletion of the entry wasn't
+         * accomplished, and needs to be accomplished.
+         */
+        VALID_INSERT_NOT_FINALIZED;
+
+        boolean isValid() {
+            return this.ordinal() >= ValueState.VALID.ordinal();
+        }
+    }
+
     /**
      * getNumOfEntries returns the number of entries allocated and not deleted for this EntrySet.
      * Although, in case EntrySet is used as an array, nextFreeIndex is can be used to calculate
@@ -394,77 +434,6 @@ class EntrySet<K, V> {
 
 
     /********************************************************************************************/
-    /*  Methods for managing the lookup context of the keys and values inside ThreadContext     */
-
-    /**
-     * Updates the key portion of the look-up context inside {@code ctx} from an entry given by entry index {@code ei}.
-     * The entry index (ei) is stored in the context so it can  be used later by other methods without passing the
-     * entry index explicitly as a parameter.
-     * Specifically, this call might be followed up by {@code valueLookUp(ctx)}.
-     *
-     * @param ctx the context that will follow the operation following this key lookup
-     * @param ei  the entry index to look up
-     * @return    true if the entry index has a valid key reference
-     */
-    boolean keyLookUp(ThreadContext ctx, int ei) {
-        ctx.entryIndex = ei;
-        return readKey(ctx.key, ei);
-    }
-
-    /**
-     * Updates the value portion of the look up context inside {@code ctx} that matches the look-up context key.
-     * Thus, {@code keyLookUp(ctx, ei)} should be called prior to this method with the same {@code ctx} instance.
-     *
-     * @param ctx the context that was initiated by {@code keyLookUp(ctx, ei)}
-     */
-    void valueLookUp(ThreadContext ctx) {
-        boolean isValid = readValue(ctx.value, ctx.entryIndex);
-
-        /*
-         The value's allocation version indicate the status of the value referenced by {@code value.reference}.
-         If {@code value.reference == INVALID_REFERENCE}, then:
-         {@code version <= INVALID_VERSION} if the removal was completed.
-         {@code version > INVALID_VERSION} if the removal was not completed.
-         otherwise:
-         {@code version <= INVALID_VERSION} if the insertion was not completed.
-         {@code version > INVALID_VERSION} if the insertion was completed.
-         */
-
-        if (!isValid) {
-            // There is no value associated with the given key
-            // we can be in the middle of insertion or in the middle of removal
-            // insert: (1)reference+version=invalid, (2)reference set, (3)version set
-            //          middle state valid reference, but invalid version
-            // remove: (1)off-heap delete bit, (2)reference invalid, (3)version negative
-            //          middle state invalid reference, valid version
-
-            // if version is negative no need to finalize delete
-            ctx.valueState = (ctx.value.getAllocVersion() < INVALID_VERSION) ?
-                ThreadContext.ValueState.MARKED_DELETED :
-                ThreadContext.ValueState.MARKED_DELETED_NOT_FINALIZED;
-        } else if (ctx.value.getAllocVersion() <= INVALID_VERSION) {
-            /*
-             * When value is connected to entry, first the value reference is CASed to the new one and after
-             * the value version is set to the new one (written off-heap). Inside entry, when value reference
-             * is invalid its version can only be invalid (0) or negative. When value reference is valid and
-             * its version is either invalid (0) or negative, the insertion or deletion of the entry wasn't
-             * accomplished, and needs to be accomplished.
-             */
-            ctx.valueState = ThreadContext.ValueState.VALID_INSERT_NOT_FINALIZED;
-        } else {
-            ValueUtils.ValueResult result = valOffHeapOperator.isValueDeleted(ctx.value);
-            if (result == TRUE) {
-                // There is a deleted value associated with the given key
-                ctx.valueState = ThreadContext.ValueState.MARKED_DELETED_NOT_FINALIZED;
-            } else {
-                // If result == RETRY, we ignore it, since it will be discovered later down the line as well
-                ctx.valueState = ThreadContext.ValueState.VALID;
-            }
-        }
-    }
-
-
-    /********************************************************************************************/
     /*----- Methods for managing the read path of keys and values of a specific entry' ---------*/
 
     /**
@@ -516,6 +485,89 @@ class EntrySet<K, V> {
             memoryManager.readByteBuffer(value);
         }
         return isValid;
+    }
+
+
+    /********************************************************************************************/
+    /* Methods for managing the entry context of the keys and values inside ThreadContext       */
+
+    /**
+     * Updates the key portion of the entry context inside {@code ctx} from an entry given by entry index {@code ei}.
+     * The entry index (ei) is stored in the context so it can  be used later by other methods without passing the
+     * entry index explicitly as a parameter.
+     * Specifically, this call might be followed up by {@code readValue(ctx)}.
+     *
+     * @param ctx the context that will follow the operation following this key lookup
+     * @param ei  the entry index to look up
+     * @return    true if the entry index has a valid key reference
+     */
+    boolean readKey(ThreadContext ctx, int ei) {
+        ctx.entryIndex = ei;
+        return readKey(ctx.key, ei);
+    }
+
+    /**
+     * Updates the value portion of the entry context inside {@code ctx} that matches the look-up context key.
+     * This includes both the value itself, and the value's state.
+     * Thus, {@code readKey(ctx, ei)} should be called prior to this method with the same {@code ctx} instance.
+     *
+     * @param ctx the context that was initiated by {@code readKey(ctx, ei)}
+     */
+    boolean readValue(ThreadContext ctx) {
+        boolean isValid = readValue(ctx.value, ctx.entryIndex);
+        ctx.valueState = getValueState(ctx.value);
+        return isValid;
+    }
+
+    /**
+     * Find the state of a the value that is pointed by {@code value}.
+     * Thus, {@code readValue(value, ei)} should be called prior to this method with the same {@code value} instance.
+     *
+     * @param value a buffer object that contains the value buffer
+     */
+    ValueState getValueState(ValueBuffer value) {
+        /*
+         The value's allocation version indicate the status of the value referenced by {@code value.reference}.
+         If {@code value.reference == INVALID_REFERENCE}, then:
+         {@code version <= INVALID_VERSION} if the removal was completed.
+         {@code version > INVALID_VERSION} if the removal was not completed.
+         otherwise:
+         {@code version <= INVALID_VERSION} if the insertion was not completed.
+         {@code version > INVALID_VERSION} if the insertion was completed.
+         */
+
+        if (!value.isValid()) {
+            /*
+             There is no value associated with the given key
+             we can be in the middle of insertion or in the middle of removal
+             insert: (1)reference+version=invalid, (2)reference set, (3)version set
+                      middle state valid reference, but invalid version
+             remove: (1)off-heap delete bit, (2)reference invalid, (3)version negative
+                      middle state invalid reference, valid version
+            */
+
+            // if version is negative no need to finalize delete
+            return (value.getAllocVersion() < INVALID_VERSION) ?
+                    ValueState.DELETED :
+                    ValueState.DELETED_NOT_FINALIZED;
+        }
+
+        if (value.getAllocVersion() <= INVALID_VERSION) {
+            /*
+             * When value is connected to entry, first the value reference is CASed to the new one and after
+             * the value version is set to the new one (written off-heap). Inside entry, when value reference
+             * is invalid its version can only be invalid (0) or negative. When value reference is valid and
+             * its version is either invalid (0) or negative, the insertion or deletion of the entry wasn't
+             * accomplished, and needs to be accomplished.
+             */
+            return ValueState.VALID_INSERT_NOT_FINALIZED;
+        }
+
+        ValueUtils.ValueResult result = valOffHeapOperator.isValueDeleted(value);
+
+        // If result == TRUE, there is a deleted value associated with the given key
+        // If result == RETRY, we ignore it, since it will be discovered later down the line as well
+        return (result == TRUE) ? ValueState.DELETED_NOT_FINALIZED : ValueState.VALID;
     }
 
 

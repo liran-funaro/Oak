@@ -1184,14 +1184,14 @@ class InternalOakMap<K, V> {
                 initAfterRebalance(ctx);
             }
 
-            // build LookUp that sets key references and does not check for value validity.
-            state.getChunk().keyLookUp(ctx, state.getIndex());
+            // build the entry context that sets key references and does not check for value validity.
+            state.getChunk().readKeyFromEntryIndex(ctx, state.getIndex());
             assert ctx.isKeyValid();
 
             if (needsValue) {
                 // Set value references and checks for value validity.
                 // if value is deleted ctx.value is going to be invalid
-                state.getChunk().valueLookUp(ctx);
+                state.getChunk().readValueFromEntryIndex(ctx);
                 if (ctx.value.isValid()) {
                     ctx.value.setAllocVersion(state.getChunk().completeLinking(ctx));
                     // The CAS could not complete due to concurrent rebalance, so rebalance and try again
