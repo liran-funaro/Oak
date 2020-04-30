@@ -6,13 +6,13 @@
 
 package com.oath.oak;
 
-// this is the interface to be implemented to replace the OakNativeMemoryAllocator
-// this is about allocation of a new block allocation (which has inside it a DirectByteBuffer in order to continue
-// supporting off-heap memory).
-// allocator is also getting a block allocation to reuse the memory, given this allocation is no longer in use by any
-// thread.
-// Note that block allocations cannot be merged into a single allocation, and an allocation currently is not split.
-
+/**
+ * This is an interface to be implemented as an alternative to OakNativeMemoryAllocator.
+ * Its purpose is to allocate new buffers (DirectByteBuffer) which will be delivered as a Slice object.
+ * The allocator can also recycle the memory returned as a Slice object, given this allocation is no longer in use by
+ * any thread.
+ * Note that two allocations cannot be merged into a single allocation, and an allocation currently is not split.
+ */
 interface OakBlockMemoryAllocator {
 
     // Allocates a portion of a block of the given size, thread safe.
