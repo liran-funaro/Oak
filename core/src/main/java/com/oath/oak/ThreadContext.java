@@ -1,7 +1,7 @@
 package com.oath.oak;
 
 /**
- * Encapsulates the lookup information, from when entry (key) was
+ * Encapsulates the entry context, from when entry (key) was
  * (or wasn't) found and until the operation was completed.
  */
 class ThreadContext {

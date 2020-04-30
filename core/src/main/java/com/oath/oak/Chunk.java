@@ -229,7 +229,7 @@ class Chunk<K, V> {
             // if item's key is larger - we've exceeded our key
             // it's not in chunk - no need to search further
             if (cmp < 0) {
-                // Reset lookup key state to INVALID
+                // Reset entry context to be INVALID
                 ctx.invalidate();
                 return;
             }
@@ -245,7 +245,7 @@ class Chunk<K, V> {
             curr = entrySet.getNextEntryIndex(curr);
         }
 
-        // Reset lookup key state to INVALID
+        // Reset entry context to be INVALID
         ctx.invalidate();
     }
 
@@ -344,7 +344,7 @@ class Chunk<K, V> {
      */
     int completeLinking(ThreadContext ctx) {
         if (ctx.valueState != EntrySet.ValueState.VALID_INSERT_NOT_FINALIZED) {
-            // the version written in lookup is a good one!
+            // the version written in the value is a good one!
             return ctx.value.getAllocVersion();
         }
         if (!publish()) {

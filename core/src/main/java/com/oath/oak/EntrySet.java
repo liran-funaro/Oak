@@ -497,7 +497,7 @@ class EntrySet<K, V> {
      * entry index explicitly as a parameter.
      * Specifically, this call might be followed up by {@code readValue(ctx)}.
      *
-     * @param ctx the context that will follow the operation following this key lookup
+     * @param ctx the context that will be updated and follows the operation with this key
      * @param ei  the entry index to look up
      * @return    true if the entry index has a valid key reference
      */
@@ -660,7 +660,7 @@ class EntrySet<K, V> {
     /**
      * writeValueCommit does the physical CAS of the value reference, which is the Linearization
      * Point of the insertion. It then tries to complete the insertion by CASing the value's version
-     * if was not yet assigned (@see #writeValueFinish(LookUp)).
+     * if was not yet assigned (@see #writeValueFinish(ThreadContext)).
      *
      * @param ctx The context that follows the operation since the key was found/created.
      *            Holds the entry to which the value reference is linked, the old and new value
