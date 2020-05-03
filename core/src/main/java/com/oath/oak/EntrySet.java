@@ -606,17 +606,19 @@ class EntrySet<K, V> {
         int keySize = keySerializer.calculateSize(key);
 
         int intIdx = entryIdx2intIdx(ctx.entryIndex);
-        // key and value must be set before returned
-        // setting the value reference to <INVALID_VALUE_REFERENCE, INVALID_VERSION>
-        // TODO: should we do the following setting? Because it is to set zero on zero...
-        setEntryFieldLongVolatile(intIdx, OFFSET.VALUE_REFERENCE, ReferenceCodec.INVALID_REFERENCE);
-        setEntryFieldInt(intIdx, OFFSET.VALUE_VERSION, INVALID_VERSION);
 
         memoryManager.allocate(ctx.key, keySize, MemoryManager.Allocate.KEY);
         // byteBuffer.slice() is set so it protects us from the overwrites of the serializer
         // TODO: better serializer need to be given OakWBuffer and not ByteBuffer
         keySerializer.serialize(key, ctx.key.getAllocByteBuffer().slice());
 
+        /*
+        The current entry key reference should be updated.
+        The value reference and version should be invalid.
+        In reality, the value's entries are already set to zero.
+        Either because they are initialized that way (see specs),
+        or because we invalidated them when we deleted an older value.
+         */
         setEntryFieldLong(intIdx, OFFSET.KEY_REFERENCE, KEY.encode(ctx.key));
     }
 
