@@ -10,6 +10,8 @@ import java.util.function.Function;
 
 /**
  * This class is used for when a detached access to the value is needed without synchronization.
+ * It does not have to acquire a read lock before each access.
+ * Thus, it can only be used without other concurrent writes in the background.
  * It is used by stream iterators that iterate over the values (ValueStreamIterator and EntryStreamIterator).
  */
 class OakDetachedReadValueBuffer extends OakDetachedReadKeyBuffer {
