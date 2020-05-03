@@ -19,7 +19,7 @@ interface MemoryManager extends Closeable {
     long allocated();
 
     /**
-     * This method allocates memory out of the off-heap, i.e., the ByteBuffer inside of {@code alloc} is pointing to the
+     * This method allocates memory out of the off-heap, i.e., the ByteBuffer inside of {@code s} is pointing to the
      * off-heap. The blockID, is an internal reference to which block the ByteBuffer points, allowing the functions
      * {@code getSliceFromBlockID} and {@code getByteBufferFromBlockID} to reconstruct the same ByteBuffer.
      *
@@ -30,8 +30,8 @@ interface MemoryManager extends Closeable {
     void allocate(Slice s, int size, Allocate allocate);
 
     /**
-     * When returning an alloc to the Memory Manager, depending on the implementation, there might be a restriction on
-     * whether this allocation is reachable by other threads or not.
+     * When returning an allocated Slice to the Memory Manager, depending on the implementation, there might be a
+     * restriction on whether this allocation is reachable by other threads or not.
      *
      * @param s the allocation object to release
      */

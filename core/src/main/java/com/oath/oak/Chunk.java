@@ -322,7 +322,7 @@ class Chunk<K, V> {
     }
 
     /**
-     * This function completes the insertion (or deletion) of a value to Entry. When inserting a
+     * This function completes the insertion of a value to Entry. When inserting a
      * value, the value reference is CASed inside the entry first and only afterwards the version is
      * CASed. Thus, there can be a time in which the value reference is valid but the version is
      * INVALID_VERSION or a negative one. In this function, the version is CASed to complete the
@@ -489,6 +489,64 @@ class Chunk<K, V> {
         return TRUE;
     }
 
+
+    /********************************************************************************************/
+    /*------------------------- Methods that are used for rebalance  ---------------------------*/
+
+    int getMaxItems() {
+        return maxItems;
+    }
+
+    /**
+     * Engage the chunk to a rebalancer r.
+     *
+     * @param r -- a rebalancer to engage with
+     */
+    void engage(Rebalancer<K, V> r) {
+        rebalancer.compareAndSet(null, r);
+    }
+
+    /**
+     * Checks whether the chunk is engaged with a given rebalancer.
+     *
+     * @param r -- a rebalancer object. If r is null, verifies that the chunk is not engaged to any rebalancer
+     * @return true if the chunk is engaged with r, false otherwise
+     */
+    boolean isEngaged(Rebalancer<K, V> r) {
+        return rebalancer.get() == r;
+    }
+
+    /**
+     * Fetch a rebalancer engaged with the chunk.
+     *
+     * @return rebalancer object or null if not engaged.
+     */
+    Rebalancer<K, V> getRebalancer() {
+        return rebalancer.get();
+    }
+
+    boolean shouldRebalance() {
+        // perform actual check only in pre defined percentage of puts
+        if (ThreadLocalRandom.current().nextInt(100) > REBALANCE_PROB_PERC) {
+            return false;
+        }
+
+        // if another thread already runs rebalance -- skip it
+        if (!isEngaged(null)) {
+            return false;
+        }
+        int numOfEntries = entrySet.getNumOfEntries();
+        int numOfItems = statistics.getCompactedCount();
+        int sortedCount = this.sortedCount.get();
+        // Reasons for executing a rebalance:
+        // 1. There are no sorted keys and the total number of entries is above a certain threshold.
+        // 2. There are sorted keys, but the total number of unsorted keys is too big.
+        // 3. Out of the occupied entries, there are not enough actual items.
+        return (sortedCount == 0 && numOfEntries * MAX_ENTRIES_FACTOR > maxItems) ||
+                (sortedCount > 0 && (sortedCount * SORTED_REBALANCE_RATIO) < numOfEntries) ||
+                (numOfEntries * MAX_IDLE_ENTRIES_FACTOR > maxItems && numOfItems * MAX_IDLE_ENTRIES_FACTOR < numOfEntries);
+    }
+
     /**
      * Copies entries from srcChunk (starting srcEntryIdx) to this chunk,
      * performing entries sorting on the fly (delete entries that are removed as well).
@@ -496,8 +554,8 @@ class Chunk<K, V> {
      * @param srcChunk    chunk to copy from
      * @param srcEntryIdx start position for copying
      * @param maxCapacity max number of entries "this" chunk can contain after copy
-     * @return entry index of next to the last copied entry (in the srcChunk),
-     *              NONE_NEXT if all items were copied
+     * @return            entry index of next to the last copied entry (in the srcChunk),
+     *                    NONE_NEXT if all items were copied
      */
     final int copyPartNoKeys(EntrySet.ValueBuffer tempValue, Chunk<K, V> srcChunk, int srcEntryIdx, int maxCapacity) {
 
@@ -562,64 +620,6 @@ class Chunk<K, V> {
         sortedCount.set(numOfEntries);
         statistics.updateInitialSortedCount(sortedCount.get());
         return srcEntryIdx; // if NONE_NEXT then we finished copying old chunk, else we reached max in new chunk
-    }
-
-
-    /********************************************************************************************/
-    /*----------------------- Methods that are used by the rebalancer  -------------------------*/
-
-    int getMaxItems() {
-        return maxItems;
-    }
-
-    /**
-     * Engage the chunk to a rebalancer r.
-     *
-     * @param r -- a rebalancer to engage with
-     */
-    void engage(Rebalancer<K, V> r) {
-        rebalancer.compareAndSet(null, r);
-    }
-
-    /**
-     * Checks whether the chunk is engaged with a given rebalancer.
-     *
-     * @param r -- a rebalancer object. If r is null, verifies that the chunk is not engaged to any rebalancer
-     * @return true if the chunk is engaged with r, false otherwise
-     */
-    boolean isEngaged(Rebalancer<K, V> r) {
-        return rebalancer.get() == r;
-    }
-
-    /**
-     * Fetch a rebalancer engaged with the chunk.
-     *
-     * @return rebalancer object or null if not engaged.
-     */
-    Rebalancer<K, V> getRebalancer() {
-        return rebalancer.get();
-    }
-
-    boolean shouldRebalance() {
-        // perform actual check only in pre defined percentage of puts
-        if (ThreadLocalRandom.current().nextInt(100) > REBALANCE_PROB_PERC) {
-            return false;
-        }
-
-        // if another thread already runs rebalance -- skip it
-        if (!isEngaged(null)) {
-            return false;
-        }
-        int numOfEntries = entrySet.getNumOfEntries();
-        int numOfItems = statistics.getCompactedCount();
-        int sortedCount = this.sortedCount.get();
-        // Reasons for executing a rebalance:
-        // 1. There are no sorted keys and the total number of entries is above a certain threshold.
-        // 2. There are sorted keys, but the total number of unsorted keys is too big.
-        // 3. Out of the occupied entries, there are not enough actual items.
-        return (sortedCount == 0 && numOfEntries * MAX_ENTRIES_FACTOR > maxItems) ||
-                (sortedCount > 0 && (sortedCount * SORTED_REBALANCE_RATIO) < numOfEntries) ||
-                (numOfEntries * MAX_IDLE_ENTRIES_FACTOR > maxItems && numOfItems * MAX_IDLE_ENTRIES_FACTOR < numOfEntries);
     }
 
 
@@ -776,7 +776,7 @@ class Chunk<K, V> {
         static final int SKIP_ENTRIES_FOR_BIGGER_STACK = 1; // 1 is the lowest possible value
 
         DescendingIter(ThreadContext ctx) {
-            EntrySet.KeyBuffer keyBuff = ctx.tempKey;
+            EntrySet.KeyBuffer tempKeyBuff = ctx.tempKey;
 
             from = null;
             stack = new IntStack(entrySet.getLastEntryIndex());
@@ -784,7 +784,7 @@ class Chunk<K, V> {
             anchor = // this is the last sorted entry
                     (sortedCnt == 0 ? entrySet.getHeadNextIndex() : sortedCnt);
             stack.push(anchor);
-            initNext(keyBuff);
+            initNext(tempKeyBuff);
         }
 
         DescendingIter(ThreadContext ctx, K from, boolean inclusive) {
