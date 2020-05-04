@@ -7,6 +7,14 @@ public class ValueBuffer extends OakAttachedReadBuffer {
         super(headerSize);
     }
 
+    public ValueBuffer(ValueUtils valueOperator) {
+        super(valueOperator.getHeaderSize());
+    }
+
+    public ValueBuffer(ValueBuffer value) {
+        super(value);
+    }
+
     @Override
     void invalidate() {
         super.invalidate();

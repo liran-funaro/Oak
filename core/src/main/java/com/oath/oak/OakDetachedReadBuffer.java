@@ -11,19 +11,33 @@ import java.nio.ByteOrder;
 import java.util.function.Function;
 
 /**
- * This is an abstract class for detached buffers.
- * A class needs to implement its two abstract, protected methods that are used
- * internally by this abstract class.
- *  - OakAttachedReadBuffer getAttachedBuffer()
+ * This is a generic class for key/value detached buffers.
+ * This class is used for when a detached access to the key/value is needed without synchronization:
+ *  - KeyIterator
+ *  - EntryIterator (for keys)
+ *  - KeyStreamIterator
+ *  - ValueStreamIterator
+ *  - EntryStreamIterator (for both keys and values)
+ *
+ * It should only be used without other concurrent writes in the background to this buffer.
+ *
+ * A child class that require synchronization, needs to override the following method that is used
+ * internally by this class.
  *  - <T> T transformBuffer(Function<OakAttachedReadBuffer, T> transformer)
  * See the methods documentation below for more information.
  */
-abstract class OakDetachedReadBuffer implements OakDetachedBuffer, OakUnsafeDirectBuffer {
+class OakDetachedReadBuffer<B extends OakAttachedReadBuffer> implements OakDetachedBuffer, OakUnsafeDirectBuffer {
 
-    // capacity method does not require accessing the buffer, so no need for atomic operation.
+    final B buffer;
+
+    OakDetachedReadBuffer(B buffer) {
+        this.buffer = buffer;
+    }
+
+    // capacity method does not require accessing the ByteBuffer, so no need for atomic operation.
     @Override
     public int capacity() {
-        return getAttachedBuffer().capacity();
+        return buffer.capacity();
     }
 
     @Override
@@ -81,19 +95,15 @@ abstract class OakDetachedReadBuffer implements OakDetachedBuffer, OakUnsafeDire
     }
 
     /**
-     * Returned the inner attached buffer without any validation.
-     * It is used internally by this abstract class for when the internal buffer is not accessed, but only the
-     * allocation attributes are used (length, capacity, offset, limit, etc.).
-     */
-    abstract protected OakAttachedReadBuffer getAttachedBuffer();
-
-    /**
      * Apply a transformation on the inner attached buffer atomically.
-     * It is used internally by this abstract class for when we use the internal buffer to read the data.
+     * It is used internally by this class for when we use the internal buffer to read the data.
      * If the child class needs synchronization before accessing the data, it should implement the synchronization
      * in this method, surrounding the call for the transformer function.
      */
-    abstract protected <T> T transformBuffer(Function<OakAttachedReadBuffer, T> transformer);
+    protected <T> T transformBuffer(Function<OakAttachedReadBuffer, T> transformer) {
+        // Internal call. No input validation.
+        return transformer.apply(buffer);
+    }
 
     /*-------------- OakUnsafeDirectBuffer --------------*/
 
@@ -102,16 +112,16 @@ abstract class OakDetachedReadBuffer implements OakDetachedBuffer, OakUnsafeDire
         return transformBuffer(OakAttachedReadBuffer::getByteBuffer);
     }
 
-    // Offset method does not require accessing the buffer, so no need for atomic operation.
+    // Offset method does not require accessing the ByteBuffer, so no need for atomic operation.
     @Override
     public int getOffset() {
-        return getAttachedBuffer().getOffset();
+        return buffer.getOffset();
     }
 
-    // Length method does not require accessing the buffer, so no need for atomic operation.
+    // Length method does not require accessing the ByteBuffer, so no need for atomic operation.
     @Override
     public int getLength() {
-        return getAttachedBuffer().getLength();
+        return buffer.getLength();
     }
 
     @Override

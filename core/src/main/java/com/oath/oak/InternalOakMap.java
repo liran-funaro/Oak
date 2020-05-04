@@ -1017,17 +1017,12 @@ class InternalOakMap<K, V> {
 
     /*-------------- Iterators --------------*/
 
-    private OakDetachedReadKeyBuffer getKeyReference(ThreadContext ctx) {
-        OakDetachedReadKeyBuffer key = new OakDetachedReadKeyBufferSynced(memoryManager);
-        key.key.copyFrom(ctx.key);
-        return key;
+    private OakDetachedReadBuffer getKeyReference(ThreadContext ctx) {
+        return new OakDetachedReadBuffer<>(new KeyBuffer(ctx.key));
     }
 
-    private OakDetachedReadValueBuffer getValueReference(ThreadContext ctx) {
-        OakDetachedReadValueBuffer value = new OakDetachedReadValueBufferSynced(valueOperator, InternalOakMap.this);
-        value.key.copyFrom(ctx.key);
-        value.value.copyFrom(ctx.value);
-        return value;
+    private OakDetachedReadValueBufferSynced getValueReference(ThreadContext ctx) {
+        return new OakDetachedReadValueBufferSynced(ctx.key, ctx.value, valueOperator, InternalOakMap.this);
     }
 
     private static class IteratorState<K, V> {
@@ -1219,7 +1214,8 @@ class InternalOakMap<K, V> {
          * Advances next to the next entry without creating a ByteBuffer for the key.
          * Return previous index
          */
-        void advanceStream(ThreadContext ctx, OakDetachedReadKeyBuffer key, OakDetachedReadValueBuffer value) {
+        void advanceStream(ThreadContext ctx, OakDetachedReadBuffer<KeyBuffer> key,
+                           OakDetachedReadBuffer<ValueBuffer> value) {
             assert key != null || value != null;
             if (state == null) {
                 throw new NoSuchElementException();
@@ -1232,21 +1228,19 @@ class InternalOakMap<K, V> {
                 initAfterRebalance(ctx);
             }
 
-            // We must read the key at all cases (key, value, key+value)
-            KeyBuffer keyBuff = key != null ? key.key : value.key;
-            c.readKeyFromEntryIndex(keyBuff, curIndex);
+            if (key != null) {
+                c.readKeyFromEntryIndex(key.buffer, curIndex);
+            }
 
-            // if there a reference to update (this if is not executed for KeyStreamIterator)
             if (value != null) {
-                if (!state.getChunk().readValueFromEntryIndex(value.value, curIndex)) {
+                if (!state.getChunk().readValueFromEntryIndex(value.buffer, curIndex)) {
                     // If the current value is deleted, then advance and try again
                     advanceState(ctx);
                     advanceStream(ctx, key, value);
                     return;
                 }
-
-                value.key.copyFrom(keyBuff);
             }
+
             advanceState(ctx);
         }
 
@@ -1358,7 +1352,7 @@ class InternalOakMap<K, V> {
 
     class ValueStreamIterator extends Iter<OakDetachedBuffer> {
 
-        private final OakDetachedReadValueBuffer value = new OakDetachedReadValueBuffer(valueOperator.getHeaderSize());
+        private final OakDetachedReadBuffer<ValueBuffer> value = new OakDetachedReadBuffer<>(new ValueBuffer(valueOperator));
 
         ValueStreamIterator(K lo, boolean loInclusive, K hi, boolean hiInclusive, boolean isDescending) {
             super(lo, loInclusive, hi, hiInclusive, isDescending);
@@ -1422,8 +1416,8 @@ class InternalOakMap<K, V> {
 
     class EntryStreamIterator extends Iter<Map.Entry<OakDetachedBuffer, OakDetachedBuffer>> implements Map.Entry<OakDetachedBuffer, OakDetachedBuffer> {
 
-        private final OakDetachedReadKeyBuffer key = new OakDetachedReadKeyBuffer();
-        private final OakDetachedReadValueBuffer value = new OakDetachedReadValueBuffer(valueOperator.getHeaderSize());
+        private final OakDetachedReadBuffer<KeyBuffer> key = new OakDetachedReadBuffer<>(new KeyBuffer());
+        private final OakDetachedReadBuffer<ValueBuffer> value = new OakDetachedReadBuffer<>(new ValueBuffer(valueOperator));
 
         EntryStreamIterator(K lo, boolean loInclusive, K hi, boolean hiInclusive, boolean isDescending) {
             super(lo, loInclusive, hi, hiInclusive, isDescending);
@@ -1506,7 +1500,7 @@ class InternalOakMap<K, V> {
 
     public class KeyStreamIterator extends Iter<OakDetachedBuffer> {
 
-        private OakDetachedReadKeyBuffer key = new OakDetachedReadKeyBuffer();
+        private final OakDetachedReadBuffer<KeyBuffer> key = new OakDetachedReadBuffer<>(new KeyBuffer());
 
         KeyStreamIterator(K lo, boolean loInclusive, K hi, boolean hiInclusive, boolean isDescending) {
             super(lo, loInclusive, hi, hiInclusive, isDescending);

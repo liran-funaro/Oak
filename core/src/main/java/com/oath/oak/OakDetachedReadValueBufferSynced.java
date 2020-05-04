@@ -10,14 +10,19 @@ import java.util.ConcurrentModificationException;
 import java.util.function.Function;
 
 /**
- * This class is used for when a detached access to the value is needed with synchronization.
- * It extends the non-synchronized version, and changes only the transformBuffer() method to perform synchronization
+ * This class is used for when a detached access to the value is needed with synchronization:
+ *  - zero-copy get operation
+ *  - ValueIterator
+ *  - EntryIterator (for values)
+ *
+ * It extends the non-synchronized version, and overrides the transformBuffer() method to perform synchronization
  * before any access to the data.
- * It is used by non-stream iterators that iterate over the values (ValueIterator and EntryIterator).
  */
-class OakDetachedReadValueBufferSynced extends OakDetachedReadValueBuffer {
+class OakDetachedReadValueBufferSynced extends OakDetachedReadBuffer<ValueBuffer> {
 
     private static final int MAX_RETRIES = 1024;
+
+    final KeyBuffer key;
 
     private final ValueUtils valueOperator;
 
@@ -26,8 +31,10 @@ class OakDetachedReadValueBufferSynced extends OakDetachedReadValueBuffer {
      */
     private final InternalOakMap<?, ?> internalOakMap;
 
-    OakDetachedReadValueBufferSynced(ValueUtils valueOperator, InternalOakMap<?, ?> internalOakMap) {
-        super(valueOperator.getHeaderSize());
+    OakDetachedReadValueBufferSynced(KeyBuffer key, ValueBuffer value,
+                                     ValueUtils valueOperator, InternalOakMap<?, ?> internalOakMap) {
+        super(new ValueBuffer(value));
+        this.key = new KeyBuffer(key);
         this.valueOperator = valueOperator;
         this.internalOakMap = internalOakMap;
     }
@@ -38,7 +45,7 @@ class OakDetachedReadValueBufferSynced extends OakDetachedReadValueBuffer {
 
         start();
         try {
-            return transformer.apply(value);
+            return transformer.apply(buffer);
         } finally {
             end();
         }
@@ -47,7 +54,7 @@ class OakDetachedReadValueBufferSynced extends OakDetachedReadValueBuffer {
     private void start() {
         // Use a "for" loop to ensure maximal retries.
         for (int i = 0; i < MAX_RETRIES; i++) {
-            ValueUtils.ValueResult res = valueOperator.lockRead(value);
+            ValueUtils.ValueResult res = valueOperator.lockRead(buffer);
             switch (res) {
                 case TRUE:
                     return;
@@ -63,7 +70,7 @@ class OakDetachedReadValueBufferSynced extends OakDetachedReadValueBuffer {
     }
 
     private void end() {
-        valueOperator.unlockRead(value);
+        valueOperator.unlockRead(buffer);
     }
 
     /**
@@ -73,7 +80,7 @@ class OakDetachedReadValueBufferSynced extends OakDetachedReadValueBuffer {
      * it was deleted.
      */
     private void refreshValueReference() {
-        boolean success = internalOakMap.refreshValuePosition(key, value);
+        boolean success = internalOakMap.refreshValuePosition(key, buffer);
         if (!success) {
             throw new ConcurrentModificationException();
         }
