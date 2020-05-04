@@ -592,6 +592,12 @@ public class OakMap<K, V> extends AbstractMap<K, V> implements AutoCloseable, Co
         return internalOakMap.memorySize();
     }
 
+    /**
+     * Close and release the map and all the memory that is used by it.
+     * The user should ensure that there are no concurrent operations
+     * that are undergoing at the time this method is called.
+     * Failing to do so will result in an undefined behaviour.
+     */
     @Override
     public void close() {
         internalOakMap.close();
