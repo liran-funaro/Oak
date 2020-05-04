@@ -8,8 +8,10 @@ package com.oath.oak;
 
 import java.nio.ByteBuffer;
 
-// An instance of this buffer is only used when the write lock of the value referenced by it is already acquired.
-// This is the reason no lock is acquired in each access.
+/**
+ * An instance of this buffer is only used when the write lock of the key/value referenced by it is already acquired.
+ * This is the reason no lock is acquired in each access.
+ */
 class OakAttachedWriteBuffer extends OakAttachedReadBuffer implements OakWriteBuffer, OakUnsafeDirectBuffer {
 
     protected boolean enabled;

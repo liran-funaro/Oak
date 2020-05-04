@@ -9,6 +9,10 @@ package com.oath.oak;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+/**
+ * An instance of this buffer is only used when the read lock of the key/value referenced by it is already acquired.
+ * This is the reason no lock is acquired in each access.
+ */
 class OakAttachedReadBuffer extends Slice implements OakReadBuffer, OakUnsafeDirectBuffer {
 
     OakAttachedReadBuffer(int headerSize) {
