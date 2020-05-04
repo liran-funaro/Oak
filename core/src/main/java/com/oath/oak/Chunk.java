@@ -263,13 +263,13 @@ class Chunk<K, V> {
      */
     private int binaryFind(KeyBuffer tempKey, K key) {
         int sortedCount = this.sortedCount.get();
-        // if there are no sorted keys, return the head entry for a regular linear search
+        // if there are no sorted keys, return NONE_NEXT to indicate that a regular linear search is needed
         if (sortedCount == 0) {
             return NONE_NEXT;
         }
 
         // if the first item is already larger than key,
-        // return the head entry for a regular linear search
+        // return NONE_NEXT to indicate that a regular linear search is needed
         if (compareKeyAndEntryIndex(tempKey, key, entrySet.getHeadNextIndex()) <= 0) {
             return NONE_NEXT;
         }
