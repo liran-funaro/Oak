@@ -16,10 +16,10 @@ import java.util.function.Function;
  */
 class OakDetachedReadKeyBuffer extends OakDetachedReadBuffer {
 
-    final EntrySet.KeyBuffer key;
+    final KeyBuffer key;
 
     OakDetachedReadKeyBuffer() {
-        this.key = new EntrySet.KeyBuffer();
+        this.key = new KeyBuffer();
     }
 
     @Override

@@ -1233,7 +1233,7 @@ class InternalOakMap<K, V> {
             }
 
             // We must read the key at all cases (key, value, key+value)
-            EntrySet.KeyBuffer keyBuff = key != null ? key.key : value.key;
+            KeyBuffer keyBuff = key != null ? key.key : value.key;
             c.readKeyFromEntryIndex(keyBuff, curIndex);
 
             // if there a reference to update (this if is not executed for KeyStreamIterator)

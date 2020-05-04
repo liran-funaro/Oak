@@ -17,13 +17,13 @@ class ThreadContext {
     int entryIndex;
 
     /* key is used for easier access to the off-heap memory */
-    final EntrySet.KeyBuffer key;
+    final KeyBuffer key;
 
     /* The state of the value */
     EntrySet.ValueState valueState;
 
     /* value is used for easier access to the off-heap memory */
-    final EntrySet.ValueBuffer value;
+    final ValueBuffer value;
 
     /*-----------------------------------------------------------
      * Value Insertion Context
@@ -34,7 +34,7 @@ class ThreadContext {
      * and until value write was committed. It should not be used for other purposes, just transferred
      * between writeValueStart (return parameter) to writeValueCommit (input parameter)
      */
-    final EntrySet.ValueBuffer newValue;
+    final ValueBuffer newValue;
 
     /*-----------------------------------------------------------
      * Result Context
@@ -46,17 +46,17 @@ class ThreadContext {
      * Temporary Context
      *-----------------------------------------------------------*/
 
-    final EntrySet.KeyBuffer tempKey;
-    final EntrySet.ValueBuffer tempValue;
+    final KeyBuffer tempKey;
+    final ValueBuffer tempValue;
 
     ThreadContext(int threadIndex, ValueUtils valueOperator) {
         this.threadIndex = threadIndex;
-        this.key = new EntrySet.KeyBuffer();
-        this.value = new EntrySet.ValueBuffer(valueOperator.getHeaderSize());
-        this.newValue = new EntrySet.ValueBuffer(valueOperator.getHeaderSize());
+        this.key = new KeyBuffer();
+        this.value = new ValueBuffer(valueOperator.getHeaderSize());
+        this.newValue = new ValueBuffer(valueOperator.getHeaderSize());
         this.result = new Result();
-        this.tempKey = new EntrySet.KeyBuffer();
-        this.tempValue = new EntrySet.ValueBuffer(valueOperator.getHeaderSize());
+        this.tempKey = new KeyBuffer();
+        this.tempValue = new ValueBuffer(valueOperator.getHeaderSize());
         invalidate();
     }
 

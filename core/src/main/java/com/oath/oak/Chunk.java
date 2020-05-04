@@ -113,12 +113,12 @@ class Chunk<K, V> {
     }
 
     /** See {@code EntrySet.readKey(KeyBuffer)} for more information */
-    boolean readKeyFromEntryIndex(EntrySet.KeyBuffer key, int ei) {
+    boolean readKeyFromEntryIndex(KeyBuffer key, int ei) {
         return entrySet.readKey(key, ei);
     }
 
     /** See {@code EntrySet.readValue(ValueBuffer)} for more information */
-    boolean readValueFromEntryIndex(EntrySet.ValueBuffer value, int ei) {
+    boolean readValueFromEntryIndex(ValueBuffer value, int ei) {
         return entrySet.readValue(value, ei);
     }
 
@@ -146,7 +146,7 @@ class Chunk<K, V> {
      * @param key a key buffer to be updated with the minimal key
      * @return    true if successful
      */
-    boolean readMinKey(EntrySet.KeyBuffer key) {
+    boolean readMinKey(KeyBuffer key) {
         return entrySet.readKey(key, entrySet.getHeadNextIndex());
     }
 
@@ -154,7 +154,7 @@ class Chunk<K, V> {
      * @param key a key buffer to be updated with the maximal key
      * @return    true if successful
      */
-    boolean readMaxKey(EntrySet.KeyBuffer key) {
+    boolean readMaxKey(KeyBuffer key) {
         return entrySet.readKey(key, getLastItemEntryIndex());
     }
 
@@ -194,7 +194,7 @@ class Chunk<K, V> {
      * @param ei          the entry index to compare with
      * @return            the comparison result
      */
-    private int compareKeyAndEntryIndex(EntrySet.KeyBuffer tempKeyBuff, K key, int ei) {
+    private int compareKeyAndEntryIndex(KeyBuffer tempKeyBuff, K key, int ei) {
         boolean isValid = entrySet.readKey(tempKeyBuff, ei);
         assert isValid;
         return comparator.compareKeyAndSerializedKey(key, tempKeyBuff.getDataByteBuffer());
@@ -261,7 +261,7 @@ class Chunk<K, V> {
      * (2) entries are unsorted so there is a need to start from the beginning of the linked list
      * NONE_NEXT is going to be returned
      */
-    private int binaryFind(EntrySet.KeyBuffer tempKey, K key) {
+    private int binaryFind(KeyBuffer tempKey, K key) {
         int sortedCount = this.sortedCount.get();
         // if there are no sorted keys, return the head entry for a regular linear search
         if (sortedCount == 0) {
@@ -400,7 +400,7 @@ class Chunk<K, V> {
         int prev, curr, cmp;
         int anchor = INVALID_ANCHOR_INDEX;
         final int ei = ctx.entryIndex;
-        final EntrySet.KeyBuffer tempKeyBuff = ctx.tempKey;
+        final KeyBuffer tempKeyBuff = ctx.tempKey;
         while (true) {
             // start iterating from quickly-found node (by binary search) in sorted part of order-array
             if (anchor == INVALID_ANCHOR_INDEX) {
@@ -557,7 +557,7 @@ class Chunk<K, V> {
      * @return            entry index of next to the last copied entry (in the srcChunk),
      *                    NONE_NEXT if all items were copied
      */
-    final int copyPartNoKeys(EntrySet.ValueBuffer tempValue, Chunk<K, V> srcChunk, int srcEntryIdx, int maxCapacity) {
+    final int copyPartNoKeys(ValueBuffer tempValue, Chunk<K, V> srcChunk, int srcEntryIdx, int maxCapacity) {
 
         if (srcEntryIdx == NONE_NEXT) {
             return NONE_NEXT;
@@ -730,7 +730,7 @@ class Chunk<K, V> {
         }
 
         AscendingIter(ThreadContext ctx, K from, boolean inclusive) {
-            EntrySet.KeyBuffer tempKeyBuff = ctx.tempKey;
+            KeyBuffer tempKeyBuff = ctx.tempKey;
             next = binaryFind(tempKeyBuff, from);
             next = (next == NONE_NEXT) ? entrySet.getHeadNextIndex() : entrySet.getNextEntryIndex(next);
             int compare = -1;
@@ -776,7 +776,7 @@ class Chunk<K, V> {
         static final int SKIP_ENTRIES_FOR_BIGGER_STACK = 1; // 1 is the lowest possible value
 
         DescendingIter(ThreadContext ctx) {
-            EntrySet.KeyBuffer tempKeyBuff = ctx.tempKey;
+            KeyBuffer tempKeyBuff = ctx.tempKey;
 
             from = null;
             stack = new IntStack(entrySet.getLastEntryIndex());
@@ -788,7 +788,7 @@ class Chunk<K, V> {
         }
 
         DescendingIter(ThreadContext ctx, K from, boolean inclusive) {
-            EntrySet.KeyBuffer tempKeyBuff = ctx.tempKey;
+            KeyBuffer tempKeyBuff = ctx.tempKey;
 
             this.from = from;
             this.inclusive = inclusive;
@@ -800,7 +800,7 @@ class Chunk<K, V> {
             initNext(tempKeyBuff);
         }
 
-        private void initNext(EntrySet.KeyBuffer keyBuff) {
+        private void initNext(KeyBuffer keyBuff) {
             traverseLinkedList(keyBuff, true);
             advance(keyBuff);
         }
@@ -845,7 +845,7 @@ class Chunk<K, V> {
          *
          * @param firstTimeInvocation
          */
-        private void traverseLinkedList(EntrySet.KeyBuffer tempKeyBuff, boolean firstTimeInvocation) {
+        private void traverseLinkedList(KeyBuffer tempKeyBuff, boolean firstTimeInvocation) {
             assert stack.size() == 1;   // ancor is in the stack
             if (prevAnchor == entrySet.getNextEntryIndex(anchor)) {
                 next = NONE_NEXT;   // there is no next;
@@ -895,7 +895,7 @@ class Chunk<K, V> {
             stack.push(anchor);
         }
 
-        private void advance(EntrySet.KeyBuffer keyBuff) {
+        private void advance(KeyBuffer keyBuff) {
             while (true) {
                 findNewNextInStack();
                 if (next != NONE_NEXT) {

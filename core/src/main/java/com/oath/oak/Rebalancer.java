@@ -127,7 +127,7 @@ class Rebalancer<K, V> {
         int ei = firstFrozen.getFirstItemEntryIndex();
         List<Chunk<K, V>> newChunks = new LinkedList<>();
 
-        EntrySet.ValueBuffer valueBuff = ctx.tempValue;
+        ValueBuffer valueBuff = ctx.tempValue;
 
         while (true) {
             ei = currNewChunk.copyPartNoKeys(valueBuff, currFrozen, ei, entriesLowThreshold);
@@ -155,7 +155,7 @@ class Rebalancer<K, V> {
                     // created by the split. The new min key is a copy of the older one
                     // We need to use slice() method here as we want new object to be created
 
-                    EntrySet.KeyBuffer keyBuff = ctx.tempKey;
+                    KeyBuffer keyBuff = ctx.tempKey;
                     currFrozen.readKeyFromEntryIndex(keyBuff, ei);
                     ByteBuffer bb = keyBuff.getDataByteBuffer();
                     int size = keyBuff.getAllocLength();
@@ -201,7 +201,7 @@ class Rebalancer<K, V> {
         return counter < maxCount;
     }
 
-    private void completeCopy(EntrySet.ValueBuffer tempValue, Chunk<K, V> dest, int ei, List<Chunk<K, V>> srcChunks) {
+    private void completeCopy(ValueBuffer tempValue, Chunk<K, V> dest, int ei, List<Chunk<K, V>> srcChunks) {
         Iterator<Chunk<K, V>> iter = srcChunks.iterator();
         Chunk<K, V> src = iter.next();
         int maxItems = src.getMaxItems();

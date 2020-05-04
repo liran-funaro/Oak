@@ -106,11 +106,6 @@ class EntrySet<K, V> {
      *   => with the current block size of 256MB, the total memory is up to 128GB
      */
     static final ReferenceCodec KEY = new ReferenceCodec(32, 16, 16);
-    public static class KeyBuffer extends OakAttachedReadBuffer {
-        public KeyBuffer() {
-            super(0);
-        }
-    }
 
     /**
      * Value reference structure:
@@ -123,28 +118,6 @@ class EntrySet<K, V> {
      *   => with the current block size of 256MB, the total memory is up to 128GB
      */
     static final ReferenceCodec VALUE = new ReferenceCodec(32, 23, 9);
-    public static class ValueBuffer extends OakAttachedReadBuffer {
-        protected long reference;
-
-        public ValueBuffer(int headerSize) {
-            super(headerSize);
-        }
-
-        @Override
-        void invalidate() {
-            super.invalidate();
-            reference = ReferenceCodec.INVALID_REFERENCE;
-        }
-
-        void copyFrom(ValueBuffer alloc) {
-            if (alloc == this) {
-                // No need to do anything if the input is this object
-                return;
-            }
-            super.copyFrom(alloc);
-            this.reference = alloc.reference;
-        }
-    }
 
     private static final Unsafe unsafe = UnsafeUtils.unsafe;
     private final MemoryManager memoryManager;

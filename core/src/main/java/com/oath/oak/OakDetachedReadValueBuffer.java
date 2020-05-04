@@ -16,11 +16,11 @@ import java.util.function.Function;
  */
 class OakDetachedReadValueBuffer extends OakDetachedReadKeyBuffer {
 
-    final EntrySet.ValueBuffer value;
+    final ValueBuffer value;
 
     OakDetachedReadValueBuffer(int headerSize) {
         super();
-        this.value = new EntrySet.ValueBuffer(headerSize);
+        this.value = new ValueBuffer(headerSize);
     }
 
     @Override

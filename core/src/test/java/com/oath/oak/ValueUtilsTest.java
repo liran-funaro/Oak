@@ -16,7 +16,7 @@ public class ValueUtilsTest {
     private final ValueUtils valueOperator = new ValueUtilsImpl();
     private final Result r = new Result();
     private ThreadContext ctx;
-    private EntrySet.ValueBuffer s;
+    private ValueBuffer s;
 
     @Before
     public void init() {
