@@ -153,10 +153,13 @@ class InternalOakMap<K, V> {
      */
     ThreadContext getThreadLocalContext() {
         int threadIndex = contextThreadIndexCalculator.getIndex();
-        if (threadLocalContext[threadIndex] == null) {
-            threadLocalContext[threadIndex] = new ThreadContext(threadIndex, valueOperator);
+        ThreadContext ret = threadLocalContext[threadIndex];
+        if (ret == null) {
+            ret = new ThreadContext(threadIndex, valueOperator);
+            threadLocalContext[threadIndex] = ret;
         }
-        return threadLocalContext[threadIndex];
+        ret.invalidate();
+        return ret;
     }
 
     /*-------------- Methods --------------*/
