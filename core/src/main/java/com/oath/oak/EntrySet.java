@@ -162,8 +162,7 @@ class EntrySet<K, V> {
         UNKNOWN,
 
         /*
-         * There is an entry with the given key and its value is deleted (or at least in the process of
-         * being deleted, marked just off-heap).
+         * There is an entry with the given key and its value is deleted.
          */
         DELETED,
 
@@ -498,7 +497,7 @@ class EntrySet<K, V> {
      *
      * @param value a buffer object that contains the value buffer
      */
-    ValueState getValueState(ValueBuffer value) {
+    private ValueState getValueState(ValueBuffer value) {
         /*
          The value's allocation version indicate the status of the value referenced by {@code value.reference}.
          If {@code value.reference == INVALID_REFERENCE}, then:
