@@ -15,8 +15,8 @@ import java.util.function.Function;
  *  - ValueIterator
  *  - EntryIterator (for values)
  *
- * It extends the non-synchronized version, and overrides the transformBuffer() method to perform synchronization
- * before any access to the data.
+ * It extends the non-synchronized version, and overrides the safeAccessToAttachedBuffer() method to perform
+ * synchronization before any access to the data.
  */
 class OakDetachedReadValueBufferSynced extends OakDetachedReadBuffer<ValueBuffer> {
 
@@ -40,7 +40,7 @@ class OakDetachedReadValueBufferSynced extends OakDetachedReadBuffer<ValueBuffer
     }
 
     @Override
-    protected <T> T transformBuffer(Function<OakAttachedReadBuffer, T> transformer) {
+    protected <T> T safeAccessToAttachedBuffer(Function<OakAttachedReadBuffer, T> transformer) {
         // Internal call. No input validation.
 
         start();
