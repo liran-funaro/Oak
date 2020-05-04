@@ -93,7 +93,6 @@ class Slice {
         this.length = other.length;
         this.version = other.version;
         this.buffer = other.buffer;
-        assert this.headerSize == other.headerSize;
     }
 
     // Set the internal buffer.

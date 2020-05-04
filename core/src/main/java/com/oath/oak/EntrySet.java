@@ -667,20 +667,20 @@ class EntrySet<K, V> {
      * on-heap versions do not match. In this case it is assumed that we are
      * in the middle of committing a value write and need to write the off-heap value on-heap.
      *
-     * <p>
      * The version written to entry is the version written in the off-heap memory. There is no worry
      * of concurrent removals since these removals will have to first call this function as well,
      * and they eventually change the version as well.
+     *
+     * This method expects the value buffer to be valid, the valueState to be VALID_INSERT_NOT_FINALIZED, and the
+     * version to be positive.
+     * If the context that not match these requirements, its behavior is undefined.
      *
      * @param ctx The context that follows the operation since the key was found/created.
      *            It holds the entry to CAS, the previously written version of this entry
      *            and the value reference from which the correct version is read.
      *
-     * If the value's version is {@code INVALID_VERSION} a CAS will not not be preformed.
-     * Otherwise, a positive version is written to the entry.
-     * <p>
-     * Note 1: the version in the input param {@code ctx} is updated in this method to be the
-     * updated one if a valid version was returned.
+     * Note 1: the value's version and state in {@code ctx} are updated in this method to be the
+     * updated positive version and a valid state.
      *
      * Note 2: updating of the entries MUST be under published operation. The invoker of this method
      * is responsible to call it inside the publish/unpublish scope.
@@ -691,6 +691,7 @@ class EntrySet<K, V> {
         // This method should not be called when the value is not written yet, or deleted,
         // or in process of being deleted.
         assert ctx.value.isValid();
+        assert ctx.valueState == ValueState.VALID_INSERT_NOT_FINALIZED;
 
         // This method should not be called if the value is already linked
         assert entryVersion <= INVALID_VERSION;
@@ -698,7 +699,9 @@ class EntrySet<K, V> {
         int offHeapVersion = valOffHeapOperator.getOffHeapVersion(ctx.value);
         casEntriesArrayInt(entryIdx2intIdx(ctx.entryIndex), OFFSET.VALUE_VERSION,
             entryVersion, offHeapVersion);
+        // If the CAS failed, maybe some other thread updated the version.
         ctx.value.setAllocVersion(offHeapVersion);
+        ctx.valueState = ValueState.VALID;
     }
 
     /**
@@ -718,7 +721,9 @@ class EntrySet<K, V> {
      *            Holds the entry to change, the old value reference to CAS out, and the current value version.
      * @return    true if the deletion indeed updated the entry to be deleted as a unique operation
      *
-     * Note: updating of the entries MUST be under published operation. The invoker of this method
+     * Note 1: the value in {@code ctx} is updated in this method to be the DELETED.
+     *
+     * Note 2: updating of the entries MUST be under published operation. The invoker of this method
      * is responsible to call it inside the publish/unpublish scope.
      */
     boolean deleteValueFinish(ThreadContext ctx) {
@@ -726,6 +731,9 @@ class EntrySet<K, V> {
         if (version <= INVALID_VERSION) { // version is marked deleted
             return false;
         }
+
+        assert ctx.valueState == ValueState.DELETED_NOT_FINALIZED;
+
         int indIdx = entryIdx2intIdx(ctx.entryIndex);
         // Scenario: this value space is allocated once again and assigned into the same entry,
         // while this thread is sleeping. So later a valid value reference is CASed to invalid.
@@ -735,10 +743,9 @@ class EntrySet<K, V> {
             ctx.value.reference, ReferenceCodec.INVALID_REFERENCE);
         if (casEntriesArrayInt(indIdx, OFFSET.VALUE_VERSION, version, -version)) {
             numOfEntries.getAndDecrement();
-            // release the slice
-            if (ctx.isValueValid()) {
-                memoryManager.release(ctx.value);
-            }
+            memoryManager.release(ctx.value);
+            ctx.value.invalidate();
+            ctx.valueState = ValueState.DELETED;
             return true;
         }
         return false;

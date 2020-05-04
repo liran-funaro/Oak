@@ -327,20 +327,22 @@ class Chunk<K, V> {
      * CASed. Thus, there can be a time in which the value reference is valid but the version is
      * INVALID_VERSION or a negative one. In this function, the version is CASed to complete the
      * insertion.
-     * <p>
+     *
      * The version written to entry is the version written in the off-heap memory. There is no worry
      * of concurrent removals since these removals will have to first call this function as well,
      * and they eventually change the version as well.
+     *
+     * This method expects the value buffer to be valid, the valueState to be VALID_INSERT_NOT_FINALIZED, and the
+     * version to be positive.
+     * If the context that not match these requirements, its behavior is undefined.
      *
      * @param ctx The context that follows the operation since the key was found/created.
      *            It holds the entry to CAS, the value version written in this entry and the
      *            value reference from which the correct version can be read.
      * @return a version is returned.
-     * If it is {@code INVALID_VERSION} it means that a CAS was not preformed. Otherwise, a positive version is
-     * returned, and it the version written to the entry (maybe by some other thread).
-     * <p>
-     * Note that the version in the input param {@code ctx} is updated to be the right one if a valid version was
-     * returned.
+     *
+     * Note: the value's version and state in {@code ctx} are updated in this method to be the
+     * updated positive version and a valid state.
      */
     int completeLinking(ThreadContext ctx) {
         if (ctx.valueState != EntrySet.ValueState.VALID_INSERT_NOT_FINALIZED) {
