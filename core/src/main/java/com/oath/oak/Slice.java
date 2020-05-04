@@ -115,31 +115,31 @@ class Slice {
         return blockID != OakNativeMemoryAllocator.INVALID_BLOCK_ID;
     }
 
-    public int getAllocBlockID() {
+    int getAllocBlockID() {
         return blockID;
     }
 
-    public int getAllocOffset() {
+    int getAllocOffset() {
         return offset;
     }
 
-    public int getAllocLength() {
+    int getAllocLength() {
         return length;
     }
 
-    public int getAllocVersion() {
+    int getAllocVersion() {
         return version;
     }
 
-    public boolean isValidVersion() {
+    boolean isValidVersion() {
         return version != EntrySet.INVALID_VERSION;
     }
 
-    public long getAllocAddress() {
+    long getAllocAddress() {
         return ((DirectBuffer) buffer).address() + offset;
     }
 
-    public int getAllocLimit() {
+    int getAllocLimit() {
         return offset + length;
     }
 
@@ -149,7 +149,7 @@ class Slice {
         return buffer;
     }
 
-    public ByteBuffer getAllocByteBuffer() {
+    ByteBuffer getAllocByteBuffer() {
         return getInternalByteBuffer(buffer, offset);
     }
 
@@ -157,27 +157,27 @@ class Slice {
      * Data Getters
      * ------------------------------------------------------------------------------------*/
 
-    public int getDataOffset() {
+    int getDataOffset() {
         return offset + headerSize;
     }
 
-    public int getDataLength() {
+    int getDataLength() {
         return length - headerSize;
     }
 
-    public long getDataAddress() {
+    long getDataAddress() {
         return ((DirectBuffer) buffer).address() + getDataOffset();
     }
 
-    public ByteBuffer getDataByteBuffer() {
+    ByteBuffer getDataByteBuffer() {
         return getInternalByteBuffer(buffer, getDataOffset());
     }
 
-    public ByteBuffer getDataDuplicatedReadByteBuffer() {
+    ByteBuffer getDataDuplicatedReadByteBuffer() {
         return getInternalByteBuffer(buffer.asReadOnlyBuffer(), getDataOffset());
     }
 
-    public ByteBuffer getDataDuplicatedWriteByteBuffer() {
+    ByteBuffer getDataDuplicatedWriteByteBuffer() {
         return getInternalByteBuffer(buffer.duplicate(), getDataOffset());
     }
 }
