@@ -197,7 +197,7 @@ class Chunk<K, V> {
     private int compareKeyAndEntryIndex(EntrySet.KeyBuffer tempKeyBuff, K key, int ei) {
         boolean isValid = entrySet.readKey(tempKeyBuff, ei);
         assert isValid;
-        return comparator.compareKeyAndSerializedKey(key, tempKeyBuff.getAllocByteBuffer());
+        return comparator.compareKeyAndSerializedKey(key, tempKeyBuff.getDataByteBuffer());
     }
 
     /**

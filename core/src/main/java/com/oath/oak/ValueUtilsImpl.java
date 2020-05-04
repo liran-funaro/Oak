@@ -105,7 +105,7 @@ class ValueUtilsImpl implements ValueUtils {
             return result;
         }
 
-        OakAttachedWriteBuffer writeBuffer = new OakAttachedWriteBuffer(s, getHeaderSize());
+        OakAttachedWriteBuffer writeBuffer = new OakAttachedWriteBuffer(s);
         try {
             computer.accept(writeBuffer);
         } finally {
@@ -212,17 +212,17 @@ class ValueUtilsImpl implements ValueUtils {
 
     @Override
     public ByteBuffer getValueByteBufferNoHeaderPrivate(Slice alloc) {
-        return alloc.getAllocByteBuffer(getHeaderSize()).slice();
+        return alloc.getDataByteBuffer().slice();
     }
 
     @Override
     public ByteBuffer getValueByteBufferNoHeader(Slice alloc) {
-        return alloc.getAllocDuplicatedByteBuffer(getHeaderSize()).slice();
+        return alloc.getDataDuplicatedWriteByteBuffer().slice();
     }
 
     @Override
     public ByteBuffer getValueByteBufferNoHeaderReadOnly(Slice alloc) {
-        return alloc.getAllocReadByteBuffer(getHeaderSize()).slice();
+        return alloc.getDataDuplicatedReadByteBuffer().slice();
     }
 
     @Override
@@ -368,10 +368,10 @@ class ValueUtilsImpl implements ValueUtils {
     }
 
     private int getInt(Slice s, int index) {
-        return unsafe.getInt(s.getAllocAddress(index));
+        return unsafe.getInt(s.getAllocAddress() + index);
     }
 
     private void putInt(Slice s, int index, int value) {
-        unsafe.putInt(s.getAllocAddress(index), value);
+        unsafe.putInt(s.getAllocAddress() + index, value);
     }
 }

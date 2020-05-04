@@ -21,7 +21,7 @@ public class ValueUtilsSimpleTest {
         NovaManager novaManager = new NovaManager(new OakNativeMemoryAllocator(128));
         s = new Slice();
         novaManager.allocate(s, 16, MemoryManager.Allocate.VALUE);
-        s.getAllocByteBuffer().putInt(s.getAllocByteBuffer().position(), 1);
+        s.getDataByteBuffer().putInt(s.getDataByteBuffer().position(), 1);
         valueOperator.initHeader(s);
     }
 

@@ -28,7 +28,7 @@ public class OakNativeMemoryAllocatorTest {
     ByteBuffer allocate(OakNativeMemoryAllocator allocator, int size) {
         Slice s = new Slice();
         allocator.allocate(s, size, MemoryManager.Allocate.KEY);
-        return s.getAllocByteBuffer();
+        return s.getDataByteBuffer();
     }
 
     @Test

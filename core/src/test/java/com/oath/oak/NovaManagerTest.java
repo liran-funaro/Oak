@@ -18,7 +18,7 @@ public class NovaManagerTest {
             allocatedSlices[i].duplicateBuffer();
         }
         for (int i = 0; i < NovaManager.RELEASE_LIST_LIMIT; i++) {
-            assertEquals(i + 5, allocatedSlices[i].getAllocByteBuffer().remaining());
+            assertEquals(i + 5, allocatedSlices[i].getDataByteBuffer().remaining());
             novaManager.release(allocatedSlices[i]);
         }
         assertEquals(NovaManager.RELEASE_LIST_LIMIT, allocator.getFreeListLength());
@@ -28,8 +28,8 @@ public class NovaManagerTest {
             Slice s = new Slice();
             novaManager.allocate(s, i + 5, MemoryManager.Allocate.VALUE);
             assertEquals(allocatedSlices[i].getAllocBlockID(), s.getAllocBlockID());
-            assertEquals(allocatedSlices[i].getAllocByteBuffer().position(), s.getAllocByteBuffer().position());
-            assertEquals(allocatedSlices[i].getAllocByteBuffer().limit(), s.getAllocByteBuffer().limit());
+            assertEquals(allocatedSlices[i].getDataByteBuffer().position(), s.getDataByteBuffer().position());
+            assertEquals(allocatedSlices[i].getDataByteBuffer().limit(), s.getDataByteBuffer().limit());
         }
     }
 }

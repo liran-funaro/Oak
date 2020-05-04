@@ -11,34 +11,19 @@ import java.nio.ByteOrder;
 
 class OakAttachedReadBuffer extends Slice implements OakReadBuffer, OakUnsafeDirectBuffer {
 
-    protected final int headerSize;
-
     OakAttachedReadBuffer(int headerSize) {
-        this.headerSize = headerSize;
+        super(headerSize);
     }
 
-    OakAttachedReadBuffer(Slice alloc, int headerSize) {
-        super(alloc);
-        this.headerSize = headerSize;
-    }
-
-    protected void checkIndex(int index) {
-        if (index < 0 || index >= getDataLength()) {
-            throw new IndexOutOfBoundsException();
-        }
+    OakAttachedReadBuffer(Slice other) {
+        super(other);
     }
 
     protected int getDataOffset(int index) {
-        checkIndex(index);
-        // Slice.offset points to the header.
-        // The user's data offset is: offset + headerSize
-        return getAllocOffset(headerSize + index);
-    }
-
-    protected int getDataLength() {
-        // Slice.length includes the header size.
-        // The user's data length is: length - headerSize
-        return getAllocLength(headerSize);
+        if (index < 0 || index >= getDataLength()) {
+            throw new IndexOutOfBoundsException();
+        }
+        return getDataOffset() + index;
     }
 
     @Override
@@ -53,49 +38,49 @@ class OakAttachedReadBuffer extends Slice implements OakReadBuffer, OakUnsafeDir
 
     @Override
     public byte get(int index) {
-        return getAllocByteBuffer(headerSize).get(getDataOffset(index));
+        return getDataByteBuffer().get(getDataOffset(index));
     }
 
     @Override
     public char getChar(int index) {
-        return getAllocByteBuffer(headerSize).getChar(getDataOffset(index));
+        return getDataByteBuffer().getChar(getDataOffset(index));
     }
 
     @Override
     public short getShort(int index) {
-        return getAllocByteBuffer(headerSize).getShort(getDataOffset(index));
+        return getDataByteBuffer().getShort(getDataOffset(index));
     }
 
     @Override
     public int getInt(int index) {
-        return getAllocByteBuffer(headerSize).getInt(getDataOffset(index));
+        return getDataByteBuffer().getInt(getDataOffset(index));
     }
 
     @Override
     public long getLong(int index) {
-        return getAllocByteBuffer(headerSize).getLong(getDataOffset(index));
+        return getDataByteBuffer().getLong(getDataOffset(index));
     }
 
     @Override
     public float getFloat(int index) {
-        return getAllocByteBuffer(headerSize).getFloat(getDataOffset(index));
+        return getDataByteBuffer().getFloat(getDataOffset(index));
     }
 
     @Override
     public double getDouble(int index) {
-        return getAllocByteBuffer(headerSize).getDouble(getDataOffset(index));
+        return getDataByteBuffer().getDouble(getDataOffset(index));
     }
 
     /*-------------- OakUnsafeDirectBuffer --------------*/
 
     @Override
     public ByteBuffer getByteBuffer() {
-        return getAllocReadByteBuffer(headerSize);
+        return getDataDuplicatedReadByteBuffer();
     }
 
     @Override
     public int getOffset() {
-        return getAllocOffset(headerSize);
+        return getDataOffset();
     }
 
     @Override
@@ -105,6 +90,6 @@ class OakAttachedReadBuffer extends Slice implements OakReadBuffer, OakUnsafeDir
 
     @Override
     public long getAddress() {
-        return getAllocAddress(headerSize);
+        return getDataAddress();
     }
 }

@@ -77,7 +77,7 @@ abstract class OakDetachedReadBuffer implements OakDetachedBuffer, OakUnsafeDire
         if (transformer == null) {
             throw new NullPointerException();
         }
-        return transformBuffer(buffer -> transformer.apply(buffer.getAllocReadByteBuffer(buffer.headerSize).slice()));
+        return transformBuffer(buffer -> transformer.apply(buffer.getDataDuplicatedReadByteBuffer().slice()));
     }
 
     /**

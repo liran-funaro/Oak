@@ -610,7 +610,7 @@ class EntrySet<K, V> {
         memoryManager.allocate(ctx.key, keySize, MemoryManager.Allocate.KEY);
         // byteBuffer.slice() is set so it protects us from the overwrites of the serializer
         // TODO: better serializer need to be given OakWBuffer and not ByteBuffer
-        keySerializer.serialize(key, ctx.key.getAllocByteBuffer().slice());
+        keySerializer.serialize(key, ctx.key.getDataByteBuffer().slice());
 
         /*
         The current entry key reference should be updated.

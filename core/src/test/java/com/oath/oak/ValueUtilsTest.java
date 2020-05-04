@@ -29,11 +29,11 @@ public class ValueUtilsTest {
     }
 
     private void putInt(int index, int value) {
-        s.getAllocByteBuffer().putInt(s.getAllocOffset(index), value);
+        s.getAllocByteBuffer().putInt(s.getAllocOffset() + index, value);
     }
 
     private int getInt(int index) {
-        return s.getAllocByteBuffer().getInt(s.getAllocOffset(index));
+        return s.getAllocByteBuffer().getInt(s.getAllocOffset() + index);
     }
 
     @Test

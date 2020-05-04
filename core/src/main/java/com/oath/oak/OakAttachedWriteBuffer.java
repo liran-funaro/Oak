@@ -14,13 +14,8 @@ class OakAttachedWriteBuffer extends OakAttachedReadBuffer implements OakWriteBu
 
     protected boolean enabled;
 
-    OakAttachedWriteBuffer(int headerSize) {
-        super(headerSize);
-        enabled = true;
-    }
-
-    OakAttachedWriteBuffer(Slice s, int headerSize) {
-        super(s, headerSize);
+    OakAttachedWriteBuffer(Slice s) {
+        super(s);
         enabled = true;
     }
 
@@ -37,49 +32,49 @@ class OakAttachedWriteBuffer extends OakAttachedReadBuffer implements OakWriteBu
     @Override
     public OakWriteBuffer put(int index, byte value) {
         validateAccess();
-        getAllocByteBuffer(headerSize).put(getDataOffset(index), value);
+        getDataByteBuffer().put(getDataOffset(index), value);
         return this;
     }
 
     @Override
     public OakWriteBuffer putChar(int index, char value) {
         validateAccess();
-        getAllocByteBuffer(headerSize).putChar(getDataOffset(index), value);
+        getDataByteBuffer().putChar(getDataOffset(index), value);
         return this;
     }
 
     @Override
     public OakWriteBuffer putShort(int index, short value) {
         validateAccess();
-        getAllocByteBuffer(headerSize).putShort(getDataOffset(index), value);
+        getDataByteBuffer().putShort(getDataOffset(index), value);
         return this;
     }
 
     @Override
     public OakWriteBuffer putInt(int index, int value) {
         validateAccess();
-        getAllocByteBuffer(headerSize).putInt(getDataOffset(index), value);
+        getDataByteBuffer().putInt(getDataOffset(index), value);
         return this;
     }
 
     @Override
     public OakWriteBuffer putLong(int index, long value) {
         validateAccess();
-        getAllocByteBuffer(headerSize).putLong(getDataOffset(index), value);
+        getDataByteBuffer().putLong(getDataOffset(index), value);
         return this;
     }
 
     @Override
     public OakWriteBuffer putFloat(int index, float value) {
         validateAccess();
-        getAllocByteBuffer(headerSize).putFloat(getDataOffset(index), value);
+        getDataByteBuffer().putFloat(getDataOffset(index), value);
         return this;
     }
 
     @Override
     public OakWriteBuffer putDouble(int index, double value) {
         validateAccess();
-        getAllocByteBuffer(headerSize).putDouble(getDataOffset(index), value);
+        getDataByteBuffer().putDouble(getDataOffset(index), value);
         return this;
     }
 
@@ -87,6 +82,6 @@ class OakAttachedWriteBuffer extends OakAttachedReadBuffer implements OakWriteBu
 
     @Override
     public ByteBuffer getByteBuffer() {
-        return getAllocDuplicatedByteBuffer(headerSize);
+        return getDataDuplicatedWriteByteBuffer();
     }
 }
