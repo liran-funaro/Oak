@@ -27,7 +27,7 @@ public class NovaManagerTest {
         for (int i = NovaManager.RELEASE_LIST_LIMIT - 1; i > -1; i--) {
             Slice s = new Slice();
             novaManager.allocate(s, i + 5, MemoryManager.Allocate.VALUE);
-            assertEquals(allocatedSlices[i].getAllocBlockID(), s.getAllocBlockID());
+            assertEquals(allocatedSlices[i].getAllocatedBlockID(), s.getAllocatedBlockID());
             assertEquals(allocatedSlices[i].getDataByteBuffer().position(), s.getDataByteBuffer().position());
             assertEquals(allocatedSlices[i].getDataByteBuffer().limit(), s.getDataByteBuffer().limit());
         }

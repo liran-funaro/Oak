@@ -49,13 +49,22 @@ class ReferenceCodec {
      This means that the three mask+shift operations will be executed (and finished) simultaneously.
      */
 
+    /**
+     * @param s the object to encode
+     * @return  the encoded reference
+     */
     public long encode(final Slice s) {
-        long offsetPart = ((long) s.getAllocOffset()) & offsetMask;
-        long lengthPart = (((long) s.getAllocLength()) & lengthMask) << lengthShift;
-        long blockPart = (((long) s.getAllocBlockID()) & blockMask) << blockShift;
+        long offsetPart = ((long) s.getAllocatedOffset()) & offsetMask;
+        long lengthPart = (((long) s.getAllocatedLength()) & lengthMask) << lengthShift;
+        long blockPart = (((long) s.getAllocatedBlockID()) & blockMask) << blockShift;
         return offsetPart | lengthPart | blockPart;
     }
 
+    /**
+     * @param s         the object to update
+     * @param reference the reference to decode
+     * @return          true if the allocation reference is valid
+     */
     public boolean decode(final Slice s, final long reference) {
         if (!isValidReference(reference)) {
             s.invalidate();

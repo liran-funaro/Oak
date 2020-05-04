@@ -54,7 +54,7 @@ class Slice {
     }
 
     /* ------------------------------------------------------------------------------------
-     * Metadata Setters
+     * Allocation info and metadata setters
      * ------------------------------------------------------------------------------------*/
 
     // Reset to invalid state
@@ -102,81 +102,79 @@ class Slice {
     }
 
     // Set the version. Should be used by the memory allocator.
-    void setAllocVersion(int version) {
+    void setVersion(int version) {
         this.version = version;
     }
 
     /* ------------------------------------------------------------------------------------
-     * Metadata Getters
+     * Allocation info getters
      * ------------------------------------------------------------------------------------*/
 
-    boolean isValid() {
+    boolean isAllocated() {
         return blockID != OakNativeMemoryAllocator.INVALID_BLOCK_ID;
     }
 
-    int getAllocBlockID() {
+    int getAllocatedBlockID() {
         return blockID;
     }
 
-    int getAllocOffset() {
+    int getAllocatedOffset() {
         return offset;
     }
 
-    int getAllocLength() {
+    int getAllocatedLength() {
         return length;
     }
 
-    int getAllocVersion() {
-        return version;
-    }
+    /* ------------------------------------------------------------------------------------
+     * Metadata getters
+     * ------------------------------------------------------------------------------------*/
 
     boolean isValidVersion() {
         return version != EntrySet.INVALID_VERSION;
     }
 
-    long getAllocAddress() {
+    int getVersion() {
+        return version;
+    }
+
+    long getMetadataAddress() {
         return ((DirectBuffer) buffer).address() + offset;
     }
 
-    int getAllocLimit() {
-        return offset + length;
-    }
+    /* ------------------------------------------------------------------------------------
+     * Data getters
+     * ------------------------------------------------------------------------------------*/
 
-    private ByteBuffer getInternalByteBuffer(ByteBuffer buffer, int offset) {
-        buffer.limit(getAllocLimit());
-        buffer.position(offset);
+    private ByteBuffer updateDataByteBuffer(ByteBuffer buffer) {
+        buffer.limit(offset + length);
+        buffer.position(getOffset());
         return buffer;
     }
 
-    ByteBuffer getAllocByteBuffer() {
-        return getInternalByteBuffer(buffer, offset);
+    ByteBuffer getDataByteBuffer() {
+        return updateDataByteBuffer(buffer);
     }
 
-    /* ------------------------------------------------------------------------------------
-     * Data Getters
-     * ------------------------------------------------------------------------------------*/
+    ByteBuffer getDuplicatedReadByteBuffer() {
+        return updateDataByteBuffer(buffer.asReadOnlyBuffer());
+    }
 
-    int getDataOffset() {
+    ByteBuffer getDuplicatedWriteByteBuffer() {
+        return updateDataByteBuffer(buffer.duplicate());
+    }
+
+    /*-------------- OakUnsafeDirectBuffer --------------*/
+
+    public int getOffset() {
         return offset + headerSize;
     }
 
-    int getDataLength() {
+    public int getLength() {
         return length - headerSize;
     }
 
-    long getDataAddress() {
-        return ((DirectBuffer) buffer).address() + getDataOffset();
-    }
-
-    ByteBuffer getDataByteBuffer() {
-        return getInternalByteBuffer(buffer, getDataOffset());
-    }
-
-    ByteBuffer getDataDuplicatedReadByteBuffer() {
-        return getInternalByteBuffer(buffer.asReadOnlyBuffer(), getDataOffset());
-    }
-
-    ByteBuffer getDataDuplicatedWriteByteBuffer() {
-        return getInternalByteBuffer(buffer.duplicate(), getDataOffset());
+    public long getAddress() {
+        return ((DirectBuffer) buffer).address() + getOffset();
     }
 }

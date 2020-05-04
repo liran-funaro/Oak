@@ -46,7 +46,7 @@ class NovaManager implements MemoryManager {
     public void allocate(Slice s, int size, Allocate allocate) {
         boolean allocated = allocator.allocate(s, size, allocate);
         assert allocated;
-        s.setAllocVersion(globalNovaNumber.get());
+        s.setVersion(globalNovaNumber.get());
     }
 
     @Override

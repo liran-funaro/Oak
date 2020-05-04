@@ -24,23 +24,22 @@ public class ValueUtilsTest {
         ctx = new ThreadContext(0, valueOperator);
         s = ctx.value;
         novaManager.allocate(s, 20, MemoryManager.Allocate.VALUE);
-        putInt(0, 1);
         valueOperator.initHeader(s);
     }
 
     private void putInt(int index, int value) {
-        s.getAllocByteBuffer().putInt(s.getAllocOffset() + index, value);
+        s.getDataByteBuffer().putInt(s.getOffset() + index, value);
     }
 
     private int getInt(int index) {
-        return s.getAllocByteBuffer().getInt(s.getAllocOffset() + index);
+        return s.getDataByteBuffer().getInt(s.getOffset() + index);
     }
 
     @Test
     public void transformTest() {
-        putInt(8, 10);
-        putInt(12, 20);
-        putInt(16, 30);
+        putInt(0, 10);
+        putInt(4, 20);
+        putInt(8, 30);
 
         Result result = valueOperator.transform(r, s,
                 byteBuffer -> byteBuffer.getInt(0) + byteBuffer.getInt(4) + byteBuffer.getInt(8));
@@ -81,16 +80,16 @@ public class ValueUtilsTest {
             e.printStackTrace();
         }
         Thread.sleep(2000);
-        putInt(12, randomValue);
+        putInt(4, randomValue);
         valueOperator.unlockWrite(s);
         transformer.join();
     }
 
     @Test
     public void multipleConcurrentTransformsTest() {
-        putInt(8, 10);
-        putInt(12, 14);
-        putInt(16, 18);
+        putInt(0, 10);
+        putInt(4, 14);
+        putInt(8, 18);
         final int parties = 4;
         CyclicBarrier barrier = new CyclicBarrier(parties);
         Thread[] threads = new Thread[parties];
@@ -126,7 +125,7 @@ public class ValueUtilsTest {
 
     @Test
     public void cannotTransformedDifferentVersionTest() {
-        s.setAllocVersion(2);
+        s.setVersion(2);
         Result result = valueOperator.transform(r, s, byteBuffer -> byteBuffer.getInt(0));
         assertEquals(RETRY, result.operationResult);
     }
@@ -156,9 +155,9 @@ public class ValueUtilsTest {
                 return 0;
             }
         }, novaManager, null));
-        assertEquals(randomValues[0], getInt(8));
-        assertEquals(randomValues[1], getInt(12));
-        assertEquals(randomValues[2], getInt(16));
+        assertEquals(randomValues[0], getInt(0));
+        assertEquals(randomValues[1], getInt(4));
+        assertEquals(randomValues[2], getInt(8));
     }
 
     @Test(expected = IndexOutOfBoundsException.class)
@@ -242,7 +241,7 @@ public class ValueUtilsTest {
             e.printStackTrace();
         }
         Thread.sleep(2000);
-        int a = getInt(8), b = getInt(12), c = getInt(16);
+        int a = getInt(0), b = getInt(4), c = getInt(8);
         valueOperator.unlockRead(s);
         putter.join();
         assertNotEquals(randomValues[0], a);
@@ -258,9 +257,9 @@ public class ValueUtilsTest {
         for (int i = 0; i < randomValues.length; i++) {
             randomValues[i] = random.nextInt();
         }
-        putInt(8, randomValues[0] - 1);
-        putInt(12, randomValues[1] - 1);
-        putInt(16, randomValues[2] - 1);
+        putInt(0, randomValues[0] - 1);
+        putInt(4, randomValues[1] - 1);
+        putInt(8, randomValues[2] - 1);
         Thread putter = new Thread(() -> {
             try {
                 barrier.await();
@@ -294,9 +293,9 @@ public class ValueUtilsTest {
             e.printStackTrace();
         }
         Thread.sleep(2000);
-        putInt(8, randomValues[0]);
-        putInt(12, randomValues[1]);
-        putInt(16, randomValues[2]);
+        putInt(0, randomValues[0]);
+        putInt(4, randomValues[1]);
+        putInt(8, randomValues[2]);
         valueOperator.unlockWrite(s);
         putter.join();
     }
@@ -309,18 +308,18 @@ public class ValueUtilsTest {
 
     @Test
     public void cannotPutToValueOfDifferentVersionTest() {
-        s.setAllocVersion(2);
+        s.setVersion(2);
         assertEquals(RETRY, valueOperator.put(null, ctx, null, null, novaManager, null));
     }
 
     @Test
     public void computeTest() {
         int value = new Random().nextInt(128);
-        putInt(8, value);
+        putInt(0, value);
         valueOperator.compute(s, oakWBuffer -> {
             oakWBuffer.putInt(0, oakWBuffer.getInt(0) * 2);
         });
-        assertEquals(value * 2, getInt(8));
+        assertEquals(value * 2, getInt(0));
     }
 
     @Test(expected = IndexOutOfBoundsException.class)
@@ -345,9 +344,9 @@ public class ValueUtilsTest {
         for (int i = 0; i < randomValues.length; i++) {
             randomValues[i] = random.nextInt();
         }
-        putInt(8, randomValues[0]);
-        putInt(12, randomValues[1]);
-        putInt(16, randomValues[2]);
+        putInt(0, randomValues[0]);
+        putInt(4, randomValues[1]);
+        putInt(8, randomValues[2]);
         Thread computer = new Thread(() -> {
             try {
                 barrier.await();
@@ -370,7 +369,7 @@ public class ValueUtilsTest {
         Thread.sleep(2000);
         int[] results = new int[3];
         for (int i = 0; i < 3; i++) {
-            results[i] = getInt(i * 4 + 8);
+            results[i] = getInt(i * 4);
         }
         valueOperator.unlockRead(s);
         computer.join();
@@ -385,9 +384,9 @@ public class ValueUtilsTest {
         for (int i = 0; i < randomValues.length; i++) {
             randomValues[i] = random.nextInt();
         }
-        putInt(8, randomValues[0] - 1);
-        putInt(12, randomValues[1] - 1);
-        putInt(16, randomValues[2] - 1);
+        putInt(0, randomValues[0] - 1);
+        putInt(4, randomValues[1] - 1);
+        putInt(8, randomValues[2] - 1);
         Thread computer = new Thread(() -> {
             try {
                 barrier.await();
@@ -408,14 +407,14 @@ public class ValueUtilsTest {
             e.printStackTrace();
         }
         Thread.sleep(2000);
-        for (int i = 8; i < 20; i += 4) {
+        for (int i = 0; i < 12; i += 4) {
             putInt(i, getInt(i) + 1);
         }
         valueOperator.unlockWrite(s);
         computer.join();
-        assertNotEquals(randomValues[0], getInt(8));
-        assertNotEquals(randomValues[1], getInt(12));
-        assertNotEquals(randomValues[2], getInt(16));
+        assertNotEquals(randomValues[0], getInt(0));
+        assertNotEquals(randomValues[1], getInt(4));
+        assertNotEquals(randomValues[2], getInt(8));
     }
 
     @Test
@@ -427,7 +426,7 @@ public class ValueUtilsTest {
 
     @Test
     public void cannotComputeValueOfDifferentVersionTest() {
-        s.setAllocVersion(2);
+        s.setVersion(2);
         assertEquals(RETRY, valueOperator.compute(s, oakWBuffer -> {
         }));
     }

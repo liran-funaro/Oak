@@ -158,8 +158,8 @@ class Rebalancer<K, V> {
                     KeyBuffer keyBuff = ctx.tempKey;
                     currFrozen.readKeyFromEntryIndex(keyBuff, ei);
                     ByteBuffer bb = keyBuff.getDataByteBuffer();
-                    int size = keyBuff.getAllocLength();
-                    int offset = keyBuff.getAllocOffset();
+                    int size = keyBuff.getLength();
+                    int offset = keyBuff.getOffset();
                     ByteBuffer newMinKey = ByteBuffer.allocateDirect(size);
                     // newly allocated buffer is always positioned at its beginning.
                     for (int i = 0; i < size; i++) {

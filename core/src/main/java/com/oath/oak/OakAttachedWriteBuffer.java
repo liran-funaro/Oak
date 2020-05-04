@@ -84,6 +84,6 @@ class OakAttachedWriteBuffer extends OakAttachedReadBuffer implements OakWriteBu
 
     @Override
     public ByteBuffer getByteBuffer() {
-        return getDataDuplicatedWriteByteBuffer();
+        return getDuplicatedWriteByteBuffer();
     }
 }

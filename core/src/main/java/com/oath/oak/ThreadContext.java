@@ -71,7 +71,7 @@ class ThreadContext {
     }
 
     boolean isKeyValid() {
-        return key.isValid();
+        return key.isAllocated();
     }
 
     boolean isValueValid() {

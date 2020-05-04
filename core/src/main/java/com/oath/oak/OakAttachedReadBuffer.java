@@ -24,15 +24,15 @@ class OakAttachedReadBuffer extends Slice implements OakReadBuffer, OakUnsafeDir
     }
 
     protected int getDataOffset(int index) {
-        if (index < 0 || index >= getDataLength()) {
+        if (index < 0 || index >= getLength()) {
             throw new IndexOutOfBoundsException();
         }
-        return getDataOffset() + index;
+        return getOffset() + index;
     }
 
     @Override
     public int capacity() {
-        return getDataLength();
+        return getLength();
     }
 
     @Override
@@ -79,21 +79,6 @@ class OakAttachedReadBuffer extends Slice implements OakReadBuffer, OakUnsafeDir
 
     @Override
     public ByteBuffer getByteBuffer() {
-        return getDataDuplicatedReadByteBuffer();
-    }
-
-    @Override
-    public int getOffset() {
-        return getDataOffset();
-    }
-
-    @Override
-    public int getLength() {
-        return getDataLength();
-    }
-
-    @Override
-    public long getAddress() {
-        return getDataAddress();
+        return getDuplicatedReadByteBuffer();
     }
 }

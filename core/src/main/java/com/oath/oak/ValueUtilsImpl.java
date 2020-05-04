@@ -31,7 +31,7 @@ class ValueUtilsImpl implements ValueUtils {
     private static Unsafe unsafe = UnsafeUtils.unsafe;
 
     private static boolean CAS(Slice s, int expectedLock, int newLock, int version) {
-        long address = s.getAllocAddress();
+        long address = s.getMetadataAddress();
 
         // Since the writing is done directly to the memory, the endianness of the memory is important here.
         // Therefore, we make sure that the values are read and written correctly.
@@ -73,7 +73,7 @@ class ValueUtilsImpl implements ValueUtils {
     private <V> ValueResult innerPut(Chunk<?, V> chunk, ThreadContext ctx, V newVal, OakSerializer<V> serializer,
                                      MemoryManager memoryManager, InternalOakMap internalOakMap) {
         int capacity = serializer.calculateSize(newVal);
-        if (capacity + getHeaderSize() > ctx.value.getAllocLength()) {
+        if (capacity > ctx.value.getLength()) {
             return moveValue(chunk, ctx, memoryManager, internalOakMap, newVal);
         }
         ByteBuffer bb = getValueByteBufferNoHeader(ctx.value);
@@ -217,18 +217,18 @@ class ValueUtilsImpl implements ValueUtils {
 
     @Override
     public ByteBuffer getValueByteBufferNoHeader(Slice alloc) {
-        return alloc.getDataDuplicatedWriteByteBuffer().slice();
+        return alloc.getDuplicatedWriteByteBuffer().slice();
     }
 
     @Override
     public ByteBuffer getValueByteBufferNoHeaderReadOnly(Slice alloc) {
-        return alloc.getDataDuplicatedReadByteBuffer().slice();
+        return alloc.getDuplicatedReadByteBuffer().slice();
     }
 
     @Override
     public ValueResult lockRead(Slice s) {
         int lockState;
-        final int version = s.getAllocVersion();
+        final int version = s.getVersion();
         assert version > EntrySet.INVALID_VERSION;
         do {
             int oldVersion = getOffHeapVersion(s);
@@ -253,7 +253,7 @@ class ValueUtilsImpl implements ValueUtils {
     @Override
     public ValueResult unlockRead(Slice s) {
         int lockState;
-        final int version = s.getAllocVersion();
+        final int version = s.getVersion();
         assert version > EntrySet.INVALID_VERSION;
         do {
             lockState = getLockState(s);
@@ -265,7 +265,7 @@ class ValueUtilsImpl implements ValueUtils {
 
     @Override
     public ValueResult lockWrite(Slice s) {
-        final int version = s.getAllocVersion();
+        final int version = s.getVersion();
         assert version > EntrySet.INVALID_VERSION;
         do {
             int oldVersion = getOffHeapVersion(s);
@@ -294,7 +294,7 @@ class ValueUtilsImpl implements ValueUtils {
 
     @Override
     public ValueResult deleteValue(Slice s) {
-        final int version = s.getAllocVersion();
+        final int version = s.getVersion();
         assert version > EntrySet.INVALID_VERSION;
         do {
             int oldVersion = getOffHeapVersion(s);
@@ -317,7 +317,7 @@ class ValueUtilsImpl implements ValueUtils {
 
     @Override
     public ValueResult isValueDeleted(Slice s) {
-        final int version = s.getAllocVersion();
+        final int version = s.getVersion();
         int oldVersion = getOffHeapVersion(s);
         if (oldVersion != version) {
             return ValueResult.RETRY;
@@ -341,7 +341,7 @@ class ValueUtilsImpl implements ValueUtils {
     }
 
     private void setVersion(Slice s) {
-        putInt(s, 0, s.getAllocVersion());
+        putInt(s, 0, s.getVersion());
     }
 
     private int getLockState(Slice s) {
@@ -368,10 +368,10 @@ class ValueUtilsImpl implements ValueUtils {
     }
 
     private int getInt(Slice s, int index) {
-        return unsafe.getInt(s.getAllocAddress() + index);
+        return unsafe.getInt(s.getMetadataAddress() + index);
     }
 
     private void putInt(Slice s, int index, int value) {
-        unsafe.putInt(s.getAllocAddress() + index, value);
+        unsafe.putInt(s.getMetadataAddress() + index, value);
     }
 }

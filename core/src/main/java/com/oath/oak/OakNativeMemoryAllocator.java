@@ -13,21 +13,18 @@ import java.util.concurrent.atomic.AtomicLong;
 
 class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
 
-    private static class FreeChuck {
+    private static class FreeSlice extends Slice {
         final long id;
-        long length;
-        final Slice alloc;
 
-        FreeChuck(Slice alloc, long id) {
+        FreeSlice(Slice alloc, long id) {
+            super(alloc);
             this.id = id;
-            this.length = alloc.getAllocLength();
-            this.alloc = alloc;
         }
 
-        FreeChuck() {
+        FreeSlice() {
+            super();
             this.id = -1;
             this.length = 0;
-            this.alloc = null;
         }
     }
 
@@ -42,19 +39,19 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
     private final AtomicInteger idGenerator = new AtomicInteger(1);
 
     // free list of Slices which can be reused - sorted by buffer size, then by unique hash
-    private final ConcurrentSkipListSet<FreeChuck> freeList = new ConcurrentSkipListSet<>((x, y) -> {
+    private final ConcurrentSkipListSet<FreeSlice> freeList = new ConcurrentSkipListSet<>((x, y) -> {
         // If the length of both free chunks is the same the chunk with the smaller id comes before
         if (x.length == y.length) {
             return (int) (x.id - y.id);
         }
         // otherwise, the one with the smaller length comes before
-        return (int) (x.length - y.length);
+        return x.length - y.length;
     });
     // to search the skip list we need an item, so instead of allocating a new dummy item to look for in the skip
     // list, each thread has a dummy free chunk to find free chunk to reuse.
     // The id of the dummy is invalid so all the free chunks with greater or equal length are after the dummy
     // according to the sorting function.
-    private final FreeChuck[] dummies = new FreeChuck[ThreadIndexCalculator.MAX_THREADS];
+    private final FreeSlice[] dummies = new FreeSlice[ThreadIndexCalculator.MAX_THREADS];
     private final ThreadIndexCalculator threadIndexCalculator = ThreadIndexCalculator.newInstance();
 
     private final BlocksProvider blocksProvider;
@@ -92,7 +89,7 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
         allocateNewCurrentBlock();
         this.capacity = capacity;
         for (int i = 0; i < ThreadIndexCalculator.MAX_THREADS; i++) {
-            dummies[i] = new FreeChuck();
+            dummies[i] = new FreeSlice();
         }
     }
 
@@ -102,21 +99,21 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
     @Override
     public boolean allocate(Slice s, int size, MemoryManager.Allocate allocate) {
 
-        FreeChuck myDummy = dummies[threadIndexCalculator.getIndex()];
+        FreeSlice myDummy = dummies[threadIndexCalculator.getIndex()];
         // While the free list is not empty there can be a suitable free chunk to reuse.
         // To search a free chunk, all a thread has to do is to change the length of its dummy and use
         // skiplist.higher(myDummy) which returns a free chunk with greater or equal length to the length of the
         // dummy with time complexity of O(log N), where N is the number of free chunks.
         while (!freeList.isEmpty()) {
             myDummy.length = size;
-            FreeChuck bestFit = freeList.higher(myDummy);
+            FreeSlice bestFit = freeList.higher(myDummy);
             if (bestFit == null) {
                 break;
             }
             // If the best fit is more than REUSE_MAX_MULTIPLIER times as big than the desired length, than a new
             // buffer is allocated instead of reusing.
             // This means that currently buffers are not split, so there is some internal fragmentation.
-            if (bestFit.alloc.getAllocLength() > (REUSE_MAX_MULTIPLIER * size)) {
+            if (bestFit.getAllocatedLength() > (REUSE_MAX_MULTIPLIER * size)) {
                 break;     // all remaining buffers are too big
             }
             // If multiple threads got the same bestFit only one can use it (the one which succeeds in removing it
@@ -126,7 +123,7 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
                 if (stats != null) {
                     stats.reclaim(size);
                 }
-                s.copyFrom(bestFit.alloc);
+                s.copyFrom(bestFit);
 
                 // We read again the buffer so to get the per-thread buffer.
                 // TODO: This will be redundant once we eliminate the per-thread buffers.
@@ -178,12 +175,12 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
     // Allocator!
     @Override
     public void free(Slice s) {
-        int size = s.getAllocLength();
+        int size = s.getAllocatedLength();
         allocated.addAndGet(-size);
         if (stats != null) {
             stats.release(size);
         }
-        freeList.add(new FreeChuck(s, freeCounter.getAndIncrement()));
+        freeList.add(new FreeSlice(s, freeCounter.getAndIncrement()));
     }
 
     // Releases all memory allocated for this Oak (should be used as part of the Oak destruction)
@@ -227,7 +224,7 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
     // When some buffer need to be read from a random block
     @Override
     public void readByteBuffer(Slice s) {
-        Block b = blocksArray[s.getAllocBlockID()];
+        Block b = blocksArray[s.getAllocatedBlockID()];
         // The returned buffer is this thread's block buffer.
         // Therefore, a thread cannot read two slices from the same block without duplicating one of them.
         b.getBufferForThread(s);

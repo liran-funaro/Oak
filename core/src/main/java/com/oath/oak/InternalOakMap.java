@@ -391,7 +391,7 @@ class InternalOakMap<K, V> {
     /*-------------- OakMap Methods --------------*/
 
     static void negateVersion(Slice s) {
-        s.setAllocVersion(-Math.abs(s.getAllocVersion()));
+        s.setVersion(-Math.abs(s.getVersion()));
     }
 
     V put(K key, V value, OakTransformer<V> transformer) {
@@ -547,8 +547,8 @@ class InternalOakMap<K, V> {
                     // for non-zc interface putIfAbsent returns the previous value associated with
                     // the specified key, or null if there was no mapping for the key.
                     // so we need to create a slice to let transformer create the value object
-                    boolean isValid = c.readValueFromEntryIndex(ctx.tempValue, prevEi);
-                    if (isValid) {
+                    boolean isAllocated = c.readValueFromEntryIndex(ctx.tempValue, prevEi);
+                    if (isAllocated) {
                         if (transformer == null) {
                             return ctx.result.withFlag(FALSE);
                         }
@@ -727,7 +727,7 @@ class InternalOakMap<K, V> {
             }
 
             assert ctx.entryIndex > 0;
-            assert ctx.value.isValid();
+            assert ctx.value.isAllocated();
 
             lookUp.isFinalizeDeletionNeeded = true;
             // publish
@@ -869,14 +869,14 @@ class InternalOakMap<K, V> {
         if (!ctx.isValueValid()) {
             return null;
         }
-        return transformer.apply(ctx.key.getDataDuplicatedReadByteBuffer().slice());
+        return transformer.apply(ctx.key.getDuplicatedReadByteBuffer().slice());
     }
 
     ByteBuffer getMinKey() {
         Chunk<K, V> c = skiplist.firstEntry().getValue();
         ThreadContext ctx = getThreadLocalContext();
-        boolean isValid = c.readMinKey(ctx.tempKey);
-        return isValid ? ctx.tempKey.getDataDuplicatedReadByteBuffer().slice() : null;
+        boolean isAllocated = c.readMinKey(ctx.tempKey);
+        return isAllocated ? ctx.tempKey.getDuplicatedReadByteBuffer().slice() : null;
     }
 
     <T> T getMinKeyTransformation(OakTransformer<T> transformer) {
@@ -886,8 +886,8 @@ class InternalOakMap<K, V> {
 
         Chunk<K, V> c = skiplist.firstEntry().getValue();
         ThreadContext ctx = getThreadLocalContext();
-        boolean isValid = c.readMinKey(ctx.tempKey);
-        return isValid ? transformer.apply(ctx.tempKey.getDataByteBuffer()) : null;
+        boolean isAllocated = c.readMinKey(ctx.tempKey);
+        return isAllocated ? transformer.apply(ctx.tempKey.getDataByteBuffer()) : null;
     }
 
     ByteBuffer getMaxKey() {
@@ -901,8 +901,8 @@ class InternalOakMap<K, V> {
         }
 
         ThreadContext ctx = getThreadLocalContext();
-        boolean isValid = c.readMaxKey(ctx.tempKey);
-        return isValid ? ctx.tempKey.getDataDuplicatedReadByteBuffer().slice() : null;
+        boolean isAllocated = c.readMaxKey(ctx.tempKey);
+        return isAllocated ? ctx.tempKey.getDuplicatedReadByteBuffer().slice() : null;
     }
 
     <T> T getMaxKeyTransformation(OakTransformer<T> transformer) {
@@ -919,8 +919,8 @@ class InternalOakMap<K, V> {
             next = c.next.getReference();
         }
         ThreadContext ctx = getThreadLocalContext();
-        boolean isValid = c.readMaxKey(ctx.tempKey);
-        return isValid ? transformer.apply(ctx.tempKey.getDataByteBuffer()) : null;
+        boolean isAllocated = c.readMaxKey(ctx.tempKey);
+        return isAllocated ? transformer.apply(ctx.tempKey.getDataByteBuffer()) : null;
     }
 
     // encapsulates finding of the chunk in the skip list and later chunk list traversal
@@ -1006,8 +1006,8 @@ class InternalOakMap<K, V> {
         K keyDeserialized = keySerializer.deserialize(buff.slice());
 
         // get value associated with this (prev) key
-        boolean isValid = c.readValueFromEntryIndex(ctx.value, prevIndex);
-        if (!isValid){ // value reference was invalid, try again
+        boolean isAllocated = c.readValueFromEntryIndex(ctx.value, prevIndex);
+        if (!isAllocated){ // value reference was invalid, try again
             return lowerEntry(key);
         }
         Result valueDeserialized = valueOperator.transform(ctx.result, ctx.value,
@@ -1190,8 +1190,8 @@ class InternalOakMap<K, V> {
                 // Set value references and checks for value validity.
                 // if value is deleted ctx.value is going to be invalid
                 state.getChunk().readValueFromEntryIndex(ctx);
-                if (ctx.value.isValid()) {
-                    ctx.value.setAllocVersion(state.getChunk().completeLinking(ctx));
+                if (ctx.value.isAllocated()) {
+                    ctx.value.setVersion(state.getChunk().completeLinking(ctx));
                     // The CAS could not complete due to concurrent rebalance, so rebalance and try again
                     if (!ctx.value.isValidVersion()) {
                         rebalance(state.getChunk());
@@ -1477,7 +1477,7 @@ class InternalOakMap<K, V> {
             }
             serializedValue = valueOperator.getValueByteBufferNoHeaderReadOnly(ctx.value);
             Map.Entry<ByteBuffer, ByteBuffer> entry =
-                    new AbstractMap.SimpleEntry<>(ctx.key.getDataDuplicatedReadByteBuffer(), serializedValue);
+                    new AbstractMap.SimpleEntry<>(ctx.key.getDuplicatedReadByteBuffer(), serializedValue);
 
             T transformation = transformer.apply(entry);
             valueOperator.unlockRead(ctx.value);
@@ -1530,7 +1530,7 @@ class InternalOakMap<K, V> {
         public T next() {
             ThreadContext ctx = getThreadLocalContext();
             advance(ctx, false);
-            return transformer.apply(ctx.key.getDataDuplicatedReadByteBuffer());
+            return transformer.apply(ctx.key.getDuplicatedReadByteBuffer());
         }
     }
 

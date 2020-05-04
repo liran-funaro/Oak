@@ -91,7 +91,7 @@ class OakDetachedReadBuffer<B extends OakAttachedReadBuffer> implements OakDetac
         if (transformer == null) {
             throw new NullPointerException();
         }
-        return safeAccessToAttachedBuffer(buffer -> transformer.apply(buffer.getDataDuplicatedReadByteBuffer().slice()));
+        return safeAccessToAttachedBuffer(buffer -> transformer.apply(buffer.getDuplicatedReadByteBuffer().slice()));
     }
 
     /**

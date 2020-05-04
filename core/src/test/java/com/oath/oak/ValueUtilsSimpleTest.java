@@ -206,19 +206,19 @@ public class ValueUtilsSimpleTest {
 
     @Test
     public void testCannotReadLockDifferentVersion() {
-        s.setAllocVersion(2);
+        s.setVersion(2);
         assertEquals(RETRY, valueOperator.lockRead(s));
     }
 
     @Test
     public void testCannotWriteLockDifferentVersion() {
-        s.setAllocVersion(2);
+        s.setVersion(2);
         assertEquals(RETRY, valueOperator.lockWrite(s));
     }
 
     @Test
     public void testCannotDeletedDifferentVersion() {
-        s.setAllocVersion(2);
+        s.setVersion(2);
         assertEquals(RETRY, valueOperator.deleteValue(s));
     }
 }

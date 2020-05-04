@@ -344,6 +344,7 @@ class EntrySet<K, V> {
      *
      * @param value The value will be returned in this object
      * @param ei    The entry of which the reference and version are read from
+     * @return      true if the value allocation reference is valid
      */
     private boolean getValueReferenceAndVersion(ValueBuffer value, int ei) {
         int version;
@@ -355,10 +356,10 @@ class EntrySet<K, V> {
             reference = getValueReference(ei);
         } while (version != getValueVersion(ei));
 
-        boolean isValid = VALUE.decode(value, reference);
+        boolean isAllocated = VALUE.decode(value, reference);
         value.reference = reference;
-        value.setAllocVersion(version);
-        return isValid;
+        value.setVersion(version);
+        return isAllocated;
     }
 
 
@@ -418,7 +419,7 @@ class EntrySet<K, V> {
      *
      * @param key the buffer that will contain the key
      * @param ei  the entry index to read
-     * @return    true if the entry index has a valid key reference
+     * @return    true if the entry index has a valid key allocation reference
      */
     boolean readKey(KeyBuffer key, int ei) {
         if (ei == INVALID_ENTRY_INDEX) {
@@ -427,11 +428,11 @@ class EntrySet<K, V> {
         }
 
         long reference = getKeyReference(ei);
-        boolean isValid = KEY.decode(key, reference);
-        if (isValid) {
+        boolean isAllocated = KEY.decode(key, reference);
+        if (isAllocated) {
             memoryManager.readByteBuffer(key);
         }
-        return isValid;
+        return isAllocated;
     }
 
     /**
@@ -444,7 +445,7 @@ class EntrySet<K, V> {
      *
      * @param value the buffer that will contain the value
      * @param ei    the entry index to read
-     * @return      true if the entry index has a valid value reference
+     * @return      true if the entry index has a valid value allocation reference
      */
     boolean readValue(ValueBuffer value, int ei) {
         if (ei == INVALID_ENTRY_INDEX) {
@@ -452,11 +453,11 @@ class EntrySet<K, V> {
             return false;
         }
 
-        boolean isValid = getValueReferenceAndVersion(value, ei);
-        if (isValid) {
+        boolean isAllocated = getValueReferenceAndVersion(value, ei);
+        if (isAllocated) {
             memoryManager.readByteBuffer(value);
         }
-        return isValid;
+        return isAllocated;
     }
 
 
@@ -471,11 +472,10 @@ class EntrySet<K, V> {
      *
      * @param ctx the context that will be updated and follows the operation with this key
      * @param ei  the entry index to look up
-     * @return    true if the entry index has a valid key reference
      */
-    boolean readKey(ThreadContext ctx, int ei) {
+    void readKey(ThreadContext ctx, int ei) {
         ctx.entryIndex = ei;
-        return readKey(ctx.key, ei);
+        readKey(ctx.key, ei);
     }
 
     /**
@@ -485,10 +485,9 @@ class EntrySet<K, V> {
      *
      * @param ctx the context that was initiated by {@code readKey(ctx, ei)}
      */
-    boolean readValue(ThreadContext ctx) {
-        boolean isValid = readValue(ctx.value, ctx.entryIndex);
+    void readValue(ThreadContext ctx) {
+        readValue(ctx.value, ctx.entryIndex);
         ctx.valueState = getValueState(ctx.value);
-        return isValid;
     }
 
     /**
@@ -508,7 +507,7 @@ class EntrySet<K, V> {
          {@code version > INVALID_VERSION} if the insertion was completed.
          */
 
-        if (!value.isValid()) {
+        if (!value.isAllocated()) {
             /*
              There is no value associated with the given key
              we can be in the middle of insertion or in the middle of removal
@@ -519,12 +518,12 @@ class EntrySet<K, V> {
             */
 
             // if version is negative no need to finalize delete
-            return (value.getAllocVersion() < INVALID_VERSION) ?
+            return (value.getVersion() < INVALID_VERSION) ?
                     ValueState.DELETED :
                     ValueState.DELETED_NOT_FINALIZED;
         }
 
-        if (value.getAllocVersion() <= INVALID_VERSION) {
+        if (value.getVersion() <= INVALID_VERSION) {
             /*
              * When value is connected to entry, first the value reference is CASed to the new one and after
              * the value version is set to the new one (written off-heap). Inside entry, when value reference
@@ -645,8 +644,8 @@ class EntrySet<K, V> {
         // If the commit is for a new value, we already invalidated the old value reference and version.
         long oldValueReference = ctx.value.reference;
         long newValueReference = ctx.newValue.reference;
-        int oldValueVersion = ctx.value.getAllocVersion();
-        int newValueVersion = ctx.newValue.getAllocVersion();
+        int oldValueVersion = ctx.value.getVersion();
+        int newValueVersion = ctx.newValue.getVersion();
         assert newValueReference != ReferenceCodec.INVALID_REFERENCE;
         int intIdx = entryIdx2intIdx(ctx.entryIndex);
         if (!casEntriesArrayLong(intIdx, OFFSET.VALUE_REFERENCE,
@@ -686,11 +685,11 @@ class EntrySet<K, V> {
      * is responsible to call it inside the publish/unpublish scope.
      */
     void writeValueFinish(ThreadContext ctx) {
-        final int entryVersion = ctx.value.getAllocVersion();
+        final int entryVersion = ctx.value.getVersion();
 
         // This method should not be called when the value is not written yet, or deleted,
         // or in process of being deleted.
-        assert ctx.value.isValid();
+        assert ctx.value.isAllocated();
         assert ctx.valueState == ValueState.VALID_INSERT_NOT_FINALIZED;
 
         // This method should not be called if the value is already linked
@@ -700,7 +699,7 @@ class EntrySet<K, V> {
         casEntriesArrayInt(entryIdx2intIdx(ctx.entryIndex), OFFSET.VALUE_VERSION,
             entryVersion, offHeapVersion);
         // If the CAS failed, maybe some other thread updated the version.
-        ctx.value.setAllocVersion(offHeapVersion);
+        ctx.value.setVersion(offHeapVersion);
         ctx.valueState = ValueState.VALID;
     }
 
@@ -727,7 +726,7 @@ class EntrySet<K, V> {
      * is responsible to call it inside the publish/unpublish scope.
      */
     boolean deleteValueFinish(ThreadContext ctx) {
-        final int version = ctx.value.getAllocVersion();
+        final int version = ctx.value.getVersion();
         if (version <= INVALID_VERSION) { // version is marked deleted
             return false;
         }
@@ -781,8 +780,8 @@ class EntrySet<K, V> {
      * @return          true if the entry is deleted
      */
     boolean isEntryDeleted(ValueBuffer tempValue, int ei) {
-        boolean isValid = readValue(tempValue, ei);
-        if(!isValid) {
+        boolean isAllocated = readValue(tempValue, ei);
+        if(!isAllocated) {
             return true;
         }
         return valOffHeapOperator.isValueDeleted(tempValue) != FALSE;

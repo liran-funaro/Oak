@@ -103,8 +103,8 @@ class Chunk<K, V> {
     }
 
     /** See {@code EntrySet.readKey(ThreadContext)} for more information */
-    boolean readKeyFromEntryIndex(ThreadContext ctx, int ei) {
-        return entrySet.readKey(ctx, ei);
+    void readKeyFromEntryIndex(ThreadContext ctx, int ei) {
+        entrySet.readKey(ctx, ei);
     }
 
     /** See {@code EntrySet.readValue(ThreadContext)} for more information */
@@ -195,8 +195,8 @@ class Chunk<K, V> {
      * @return            the comparison result
      */
     private int compareKeyAndEntryIndex(KeyBuffer tempKeyBuff, K key, int ei) {
-        boolean isValid = entrySet.readKey(tempKeyBuff, ei);
-        assert isValid;
+        boolean isAllocated = entrySet.readKey(tempKeyBuff, ei);
+        assert isAllocated;
         return comparator.compareKeyAndSerializedKey(key, tempKeyBuff.getDataByteBuffer());
     }
 
@@ -347,7 +347,7 @@ class Chunk<K, V> {
     int completeLinking(ThreadContext ctx) {
         if (ctx.valueState != EntrySet.ValueState.VALID_INSERT_NOT_FINALIZED) {
             // the version written in the value is a good one!
-            return ctx.value.getAllocVersion();
+            return ctx.value.getVersion();
         }
         if (!publish()) {
             return EntrySet.INVALID_VERSION;
@@ -358,7 +358,7 @@ class Chunk<K, V> {
             unpublish();
         }
 
-        return ctx.value.getAllocVersion();
+        return ctx.value.getVersion();
     }
 
     /**
