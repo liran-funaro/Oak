@@ -14,7 +14,6 @@ import static org.junit.Assert.*;
 public class ValueUtilsTest {
     private NovaManager novaManager;
     private final ValueUtils valueOperator = new ValueUtilsImpl();
-    private final Result r = new Result();
     private ThreadContext ctx;
     private ValueBuffer s;
 
@@ -41,7 +40,7 @@ public class ValueUtilsTest {
         putInt(4, 20);
         putInt(8, 30);
 
-        Result result = valueOperator.transform(r, s,
+        Result result = valueOperator.transform(new Result(), s,
                 byteBuffer -> byteBuffer.getInt(0) + byteBuffer.getInt(4) + byteBuffer.getInt(8));
         assertEquals(TRUE, result.operationResult);
         assertEquals(60, ((Integer) result.value).intValue());
@@ -49,12 +48,12 @@ public class ValueUtilsTest {
 
     @Test(expected = IndexOutOfBoundsException.class)
     public void transformUpperBoundTest() {
-        valueOperator.transform(r, s, byteBuffer -> byteBuffer.getInt(12));
+        valueOperator.transform(new Result(), s, byteBuffer -> byteBuffer.getInt(12));
     }
 
     @Test(expected = IndexOutOfBoundsException.class)
     public void transformLowerBoundTest() {
-        valueOperator.transform(r, s, byteBuffer -> byteBuffer.getInt(-4));
+        valueOperator.transform(new Result(), s, byteBuffer -> byteBuffer.getInt(-4));
     }
 
     @Test(timeout = 5000)
@@ -68,7 +67,7 @@ public class ValueUtilsTest {
             } catch (InterruptedException | BrokenBarrierException e) {
                 e.printStackTrace();
             }
-            Result result = valueOperator.transform(r, s, byteBuffer -> byteBuffer.getInt(4));
+            Result result = valueOperator.transform(new Result(), s, byteBuffer -> byteBuffer.getInt(4));
             assertEquals(TRUE, result.operationResult);
             assertEquals(randomValue, ((Integer) result.value).intValue());
         });
@@ -101,7 +100,7 @@ public class ValueUtilsTest {
                     e.printStackTrace();
                 }
                 int index = new Random().nextInt(3) * 4;
-                Result result = valueOperator.transform(r, s, byteBuffer -> byteBuffer.getInt(index));
+                Result result = valueOperator.transform(new Result(), s, byteBuffer -> byteBuffer.getInt(index));
                 assertEquals(TRUE, result.operationResult);
                 assertEquals(10 + index, ((Integer) result.value).intValue());
             });
@@ -119,14 +118,14 @@ public class ValueUtilsTest {
     @Test
     public void cannotTransformDeletedTest() {
         valueOperator.deleteValue(s);
-        Result result = valueOperator.transform(r, s, byteBuffer -> byteBuffer.getInt(0));
+        Result result = valueOperator.transform(new Result(), s, byteBuffer -> byteBuffer.getInt(0));
         assertEquals(FALSE, result.operationResult);
     }
 
     @Test
     public void cannotTransformedDifferentVersionTest() {
         s.setVersion(2);
-        Result result = valueOperator.transform(r, s, byteBuffer -> byteBuffer.getInt(0));
+        Result result = valueOperator.transform(new Result(), s, byteBuffer -> byteBuffer.getInt(0));
         assertEquals(RETRY, result.operationResult);
     }
 
