@@ -189,6 +189,10 @@ class EntrySet<K, V> {
          */
         VALID_INSERT_NOT_FINALIZED;
 
+        /**
+         * We consider a value to be valid if it was inserted (or in the process of being inserted).
+         * @return is the value valid
+         */
         boolean isValid() {
             return this.ordinal() >= ValueState.VALID.ordinal();
         }

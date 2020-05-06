@@ -70,10 +70,18 @@ class ThreadContext {
         // No need to invalidate the temporary buffers
     }
 
+    /**
+     * We consider a key to be valid if the entry referred to a valid allocation.
+     * @return does the entry have a valid key
+     */
     boolean isKeyValid() {
         return key.isAllocated();
     }
 
+    /**
+     * See {@code ValueState.isValid()} for more details.
+     * @return does the entry have a valid value
+     */
     boolean isValueValid() {
         return valueState.isValid();
     }
