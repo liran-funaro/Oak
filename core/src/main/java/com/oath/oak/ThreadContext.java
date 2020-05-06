@@ -36,6 +36,12 @@ class ThreadContext {
      */
     final ValueBuffer newValue;
 
+    /**
+     * Flags if the new allocated value was originated from a move operation.
+     * If false, then it is a new allocation and value.isAllocated() should be false.
+     */
+    boolean isNewValueForMove;
+
     /*-----------------------------------------------------------
      * Result Context
      *-----------------------------------------------------------*/
@@ -67,6 +73,7 @@ class ThreadContext {
         newValue.invalidate();
         result.invalidate();
         valueState = EntrySet.ValueState.UNKNOWN;
+        isNewValueForMove = false;
         // No need to invalidate the temporary buffers
     }
 

@@ -615,6 +615,7 @@ class EntrySet<K, V> {
         // allocated slice. Version in time of allocation is set as part of the slice data.
         memoryManager.allocate(ctx.newValue, valueLength, MemoryManager.Allocate.VALUE);
         ctx.newValue.setReference(VALUE.encode(ctx.newValue));
+        ctx.isNewValueForMove = writeForMove;
 
         // for value written for the first time:
         // initializing the off-heap header (version and the lock to be free)
@@ -623,9 +624,6 @@ class EntrySet<K, V> {
             valOffHeapOperator.initLockedHeader(ctx.newValue);
         } else {
             valOffHeapOperator.initHeader(ctx.newValue);
-
-            // Invalidates the "old" value for the future commit
-            ctx.value.invalidate();
         }
 
         // since this is a private environment, we can only use ByteBuffer::slice, instead of ByteBuffer::duplicate
@@ -645,12 +643,22 @@ class EntrySet<K, V> {
      * @return    TRUE if the value reference was CASed successfully.
      */
     ValueUtils.ValueResult writeValueCommit(ThreadContext ctx) {
-        // If the commit is for a new value, we already invalidated the old value reference and version.
-        long oldValueReference = ctx.value.getReference();
+        long oldValueReference;
+        int oldValueVersion;
+
+        if (ctx.isNewValueForMove) {
+            oldValueReference = ctx.value.getReference();
+            oldValueVersion = ctx.value.getVersion();
+        } else {
+            // If the commit is for a new value, the old values should be invalid.
+            oldValueReference = ReferenceCodec.INVALID_REFERENCE;
+            oldValueVersion = INVALID_VERSION;
+        }
+
         long newValueReference = ctx.newValue.getReference();
-        int oldValueVersion = ctx.value.getVersion();
         int newValueVersion = ctx.newValue.getVersion();
         assert newValueReference != ReferenceCodec.INVALID_REFERENCE;
+
         int intIdx = entryIdx2intIdx(ctx.entryIndex);
         if (!casEntriesArrayLong(intIdx, OFFSET.VALUE_REFERENCE,
             oldValueReference, newValueReference)) {

@@ -488,8 +488,8 @@ class Chunk<K, V> {
             return FALSE;
         }
 
-        // If the old value is invalid, the link is for a new value (not a move)
-        if (!ctx.isValueValid()) {
+        // If we move a value, the statistics shouldn't change
+        if (!ctx.isNewValueForMove) {
             statistics.incrementAddedCount();
             externalSize.incrementAndGet();
         }
