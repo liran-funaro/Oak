@@ -18,7 +18,7 @@ public class ValueBuffer extends OakAttachedReadBuffer {
     @Override
     void invalidate() {
         super.invalidate();
-        reference = ReferenceCodec.INVALID_REFERENCE;
+        setReference(ReferenceCodec.INVALID_REFERENCE);
     }
 
     void copyFrom(ValueBuffer alloc) {
@@ -27,6 +27,14 @@ public class ValueBuffer extends OakAttachedReadBuffer {
             return;
         }
         super.copyFrom(alloc);
-        this.reference = alloc.reference;
+        this.setReference(alloc.getReference());
+    }
+
+    long getReference() {
+        return reference;
+    }
+
+    void setReference(long reference) {
+        this.reference = reference;
     }
 }

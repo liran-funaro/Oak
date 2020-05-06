@@ -357,7 +357,7 @@ class EntrySet<K, V> {
         } while (version != getValueVersion(ei));
 
         boolean isAllocated = VALUE.decode(value, reference);
-        value.reference = reference;
+        value.setReference(reference);
         value.setVersion(version);
         return isAllocated;
     }
@@ -610,7 +610,7 @@ class EntrySet<K, V> {
         // The allocated slice is actually the thread's ByteBuffer moved to point to the newly
         // allocated slice. Version in time of allocation is set as part of the slice data.
         memoryManager.allocate(ctx.newValue, valueLength, MemoryManager.Allocate.VALUE);
-        ctx.newValue.reference = VALUE.encode(ctx.newValue);
+        ctx.newValue.setReference(VALUE.encode(ctx.newValue));
 
         // for value written for the first time:
         // initializing the off-heap header (version and the lock to be free)
@@ -642,8 +642,8 @@ class EntrySet<K, V> {
      */
     ValueUtils.ValueResult writeValueCommit(ThreadContext ctx) {
         // If the commit is for a new value, we already invalidated the old value reference and version.
-        long oldValueReference = ctx.value.reference;
-        long newValueReference = ctx.newValue.reference;
+        long oldValueReference = ctx.value.getReference();
+        long newValueReference = ctx.newValue.getReference();
         int oldValueVersion = ctx.value.getVersion();
         int newValueVersion = ctx.newValue.getVersion();
         assert newValueReference != ReferenceCodec.INVALID_REFERENCE;
@@ -739,7 +739,7 @@ class EntrySet<K, V> {
         // In order to not allow this scenario happen we must release the
         // value's off-heap slice to memory manager only after deleteValueFinish is done.
         casEntriesArrayLong(indIdx, OFFSET.VALUE_REFERENCE,
-            ctx.value.reference, ReferenceCodec.INVALID_REFERENCE);
+                ctx.value.getReference(), ReferenceCodec.INVALID_REFERENCE);
         if (casEntriesArrayInt(indIdx, OFFSET.VALUE_VERSION, version, -version)) {
             numOfEntries.getAndDecrement();
             memoryManager.release(ctx.value);
