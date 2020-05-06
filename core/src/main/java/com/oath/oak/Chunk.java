@@ -201,19 +201,24 @@ class Chunk<K, V> {
     }
 
     /**
-     * look up a key
+     *  Look up a key in this chunk.
      *
-     * @param ctx the context that will follow the operation following this key lookup.
-     *            The ctx will describe the condition of the value associated with {@code key}.
-     *            If {@code (ctx.isKeyValid() && ctx.isValueValid()) == True}, the key and value was found.
-     *            If {@code ctx.isKeyValid() == False}, there is no entry with that key in this chunk.
-     *            Otherwise, if {@code ctx.isValueValid() == False}, it means that there is an entry with that key.
-     *            It can be reused in case of {@code put}, but there is no value attached to this key.
-     *            It can happen if this entry is in the midst of being inserted, or some thread removed this key and no
-     *            rebalanace occurred leaving the entry in the chunk.
-     *            It means that the value is marked off-heap as deleted, but the connection between the entry and the
-     *            value was not unlinked yet.
-     *            {@code ctx.valueState} will indicate the reason.
+     * @param ctx The context that follows the operation following this key look up.
+     *            It will describe the state of the entry (key and value) associated with the input {@code key}.
+     *            Following are the possible states of the entry:
+     *             (1) {@code key} was not found.
+     *                   This means there is no entry with the this key in this chunk.
+     *                   In this case, {@code ctx.isKeyValid() == False} and {@code ctx.isValueValid() == False}.
+     *             (2) {@code key} was found.
+     *                   In this case, {@code (ctx.isKeyValid() == True}
+     *                   The state of the value associated with {@code key} is described in {@code ctx.valueState}.
+     *                   It can be one of the following states:
+     *                     (1) not yet inserted, (2) in the process of being inserted, (3) valid,
+     *                     (4) in the process of being deleted, (5) deleted.
+     *                   For cases (2) and (3), {@code ctx.isValueValid() == True}.
+     *                   Otherwise, {@code ctx.isValueValid() == False}.
+     *                   This means that there is an entry with that key, but there is no value attached to this key.
+     *                   Such entry can be reused after finishing the deletion process, if needed.
      * @param key the key to look up
      */
     void lookUp(ThreadContext ctx, K key) {
