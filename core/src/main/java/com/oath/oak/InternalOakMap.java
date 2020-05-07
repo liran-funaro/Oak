@@ -886,11 +886,11 @@ class InternalOakMap<K, V> {
         return transformer.apply(ctx.key.getDuplicatedReadByteBuffer().slice());
     }
 
-    ByteBuffer getMinKey() {
+    OakDetachedBuffer getMinKey() {
         Chunk<K, V> c = skiplist.firstEntry().getValue();
         ThreadContext ctx = getThreadLocalContext();
-        boolean isAllocated = c.readMinKey(ctx.tempKey);
-        return isAllocated ? ctx.tempKey.getDuplicatedReadByteBuffer().slice() : null;
+        boolean isAllocated = c.readMinKey(ctx.key);
+        return isAllocated ? getKeyDetachedBuffer(ctx) : null;
     }
 
     <T> T getMinKeyTransformation(OakTransformer<T> transformer) {
@@ -904,7 +904,7 @@ class InternalOakMap<K, V> {
         return isAllocated ? transformer.apply(ctx.tempKey.getDataByteBuffer()) : null;
     }
 
-    ByteBuffer getMaxKey() {
+    OakDetachedBuffer getMaxKey() {
         Chunk<K, V> c = skiplist.lastEntry().getValue();
         Chunk<K, V> next = c.next.getReference();
         // since skiplist isn't updated atomically in split/compaction, the max key might belong in the next chunk
@@ -915,8 +915,8 @@ class InternalOakMap<K, V> {
         }
 
         ThreadContext ctx = getThreadLocalContext();
-        boolean isAllocated = c.readMaxKey(ctx.tempKey);
-        return isAllocated ? ctx.tempKey.getDuplicatedReadByteBuffer().slice() : null;
+        boolean isAllocated = c.readMaxKey(ctx.key);
+        return isAllocated ? getKeyDetachedBuffer(ctx) : null;
     }
 
     <T> T getMaxKeyTransformation(OakTransformer<T> transformer) {
