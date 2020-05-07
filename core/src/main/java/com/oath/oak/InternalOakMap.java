@@ -756,7 +756,7 @@ class InternalOakMap<K, V> {
                 continue;
             }
 
-            return getValueReference(ctx);
+            return getValueDetachedBuffer(ctx);
         }
 
         throw new RuntimeException("get failed: reached retry limit (1024).");
@@ -1020,11 +1020,11 @@ class InternalOakMap<K, V> {
 
     /*-------------- Iterators --------------*/
 
-    private OakDetachedReadBuffer getKeyReference(ThreadContext ctx) {
+    private OakDetachedReadBuffer getKeyDetachedBuffer(ThreadContext ctx) {
         return new OakDetachedReadBuffer<>(new KeyBuffer(ctx.key));
     }
 
-    private OakDetachedReadValueBufferSynced getValueReference(ThreadContext ctx) {
+    private OakDetachedReadValueBufferSynced getValueDetachedBuffer(ThreadContext ctx) {
         return new OakDetachedReadValueBufferSynced(ctx.key, ctx.value, valueOperator, InternalOakMap.this);
     }
 
@@ -1349,7 +1349,7 @@ class InternalOakMap<K, V> {
         public OakDetachedBuffer next() {
             ThreadContext ctx = getThreadLocalContext();
             advance(ctx, true);
-            return getValueReference(ctx);
+            return getValueDetachedBuffer(ctx);
         }
     }
 
@@ -1413,7 +1413,7 @@ class InternalOakMap<K, V> {
         public Map.Entry<OakDetachedBuffer, OakDetachedBuffer> next() {
             ThreadContext ctx = getThreadLocalContext();
             advance(ctx, true);
-            return new AbstractMap.SimpleImmutableEntry<>(getKeyReference(ctx), getValueReference(ctx));
+            return new AbstractMap.SimpleImmutableEntry<>(getKeyDetachedBuffer(ctx), getValueDetachedBuffer(ctx));
         }
     }
 
@@ -1496,7 +1496,7 @@ class InternalOakMap<K, V> {
         public OakDetachedBuffer next() {
             ThreadContext ctx = getThreadLocalContext();
             advance(ctx, false);
-            return getKeyReference(ctx);
+            return getKeyDetachedBuffer(ctx);
 
         }
     }
