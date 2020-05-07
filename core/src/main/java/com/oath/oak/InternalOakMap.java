@@ -792,33 +792,47 @@ class InternalOakMap<K, V> {
         throw new RuntimeException("computeIfPresent failed: reached retry limit (1024).");
     }
 
-    // used when value of a key was possibly moved and we try to search for the given key
-    // through the OakMap again
-    void refreshValuePosition(ThreadContext ctx) {
+    /**
+     * Used when value of a key was possibly moved and we try to search for the given key
+     * through the OakMap again.
+     *
+     * @param ctx The context key should be initialized with the key to refresh, and the context value
+     *            will be updated with the refreshed value.
+     * @reutrn    true if the refresh was successful.
+     */
+    boolean refreshValuePosition(ThreadContext ctx) {
         K deserializedKey = keySerializer.deserialize(ctx.key.getDataByteBuffer());
 
         for (int i = 0; i < MAX_RETRIES; i++) {
             Chunk<K, V> c = findChunk(deserializedKey); // find chunk matching key
             c.lookUp(ctx, deserializedKey);
             if (!ctx.isValueValid()) {
-                return;
+                return false;
             }
 
             if (updateVersionAfterLinking(c, ctx)) {
                 continue;
             }
-            return;
+
+            return true;
         }
 
         throw new RuntimeException("refreshValuePosition failed: reached retry limit (1024).");
     }
 
+    /**
+     * See {@code refreshValuePosition(ctx)} for more details.
+     *
+     * @param keySlice   the key to refresh
+     * @param valueSlice the output value to update
+     * @return           true if the refresh was successful.
+     */
     boolean refreshValuePosition(Slice keySlice, Slice valueSlice) {
         ThreadContext ctx = getThreadLocalContext();
         ctx.key.copyFrom(keySlice);
-        refreshValuePosition(ctx);
+        boolean isSuccessful = refreshValuePosition(ctx);
 
-        if (!ctx.isValueValid()) {
+        if (!isSuccessful) {
             return false;
         }
 
@@ -1468,8 +1482,8 @@ class InternalOakMap<K, V> {
                 return next();
             } else if (res == RETRY) {
                 do {
-                    refreshValuePosition(ctx);
-                    if (!ctx.isValueValid()) {
+                    boolean isSuccessful = refreshValuePosition(ctx);
+                    if (!isSuccessful) {
                         return next();
                     }
                     res = valueOperator.lockRead(ctx.value);
