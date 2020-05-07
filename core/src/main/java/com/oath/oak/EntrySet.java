@@ -556,18 +556,21 @@ class EntrySet<K, V> {
      *
      * @param ctx the context that will follow the operation following this key allocation
      * @param key the key to write
+     * @return    true only if the allocation was successful.
+     *            Otherwise, it means that the EntrySet is full (may require a re-balance).
      **/
-    void allocateEntry(ThreadContext ctx, K key) {
+    boolean allocateEntry(ThreadContext ctx, K key) {
         ctx.invalidate();
 
         int ei = nextFreeIndex.getAndIncrement();
         if (ei > entriesCapacity) {
-            return;
+            return false;
         }
         numOfEntries.getAndIncrement();
 
         ctx.entryIndex = ei;
         writeKey(ctx, key);
+        return true;
     }
 
     /**

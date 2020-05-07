@@ -442,8 +442,8 @@ class InternalOakMap<K, V> {
                 // There was no such key found, while EntrySet allocates the entry
                 // (holding the key) ctx is going to be updated to be used by EntrySet's
                 // subsequent requests to write value
-                c.allocateEntryAndKey(ctx, key);
-                if (!ctx.isKeyValid()) {
+                boolean isAllocationSuccessful = c.allocateEntryAndKey(ctx, key);
+                if (!isAllocationSuccessful) {
                     rebalance(c);
                     continue;
                 }
@@ -533,8 +533,8 @@ class InternalOakMap<K, V> {
                 // There was no such key found, while EntrySet allocates the entry
                 // (holding the key) ctx is going to be updated to be used by EntrySet's
                 // subsequent requests to write value
-                c.allocateEntryAndKey(ctx, key);
-                if (!ctx.isKeyValid()) {
+                boolean isAllocationSuccessful = c.allocateEntryAndKey(ctx, key);
+                if (!isAllocationSuccessful) {
                     rebalance(c);
                     continue;
                 }
@@ -634,8 +634,8 @@ class InternalOakMap<K, V> {
                 // There was no such key found, while EntrySet allocates the entry
                 // (holding the key) ctx is going to be updated to be used by EntrySet's
                 // subsequent requests to write value
-                c.allocateEntryAndKey(ctx, key);
-                if (!ctx.isKeyValid()) {
+                boolean isAllocationSuccessful = c.allocateEntryAndKey(ctx, key);
+                if (!isAllocationSuccessful) {
                     rebalance(c);
                     continue;
                 }

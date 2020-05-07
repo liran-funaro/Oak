@@ -123,8 +123,8 @@ class Chunk<K, V> {
     }
 
     /** See {@code EntrySet.allocateEntry(ThreadContext)} for more information */
-    void allocateEntryAndKey(ThreadContext ctx, K key) {
-        entrySet.allocateEntry(ctx, key);
+    boolean allocateEntryAndKey(ThreadContext ctx, K key) {
+        return entrySet.allocateEntry(ctx, key);
     }
 
     /** See {@code EntrySet.writeValueStart(ThreadContext)} for more information */
