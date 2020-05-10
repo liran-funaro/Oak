@@ -1072,7 +1072,6 @@ class InternalOakMap<K, V> {
             return index;
         }
 
-
         static <K, V> IteratorState<K, V> newInstance(Chunk<K, V> nextChunk, Chunk.ChunkIter nextChunkIter) {
             return new IteratorState<>(nextChunk, nextChunkIter, NONE_NEXT);
         }
@@ -1109,6 +1108,12 @@ class InternalOakMap<K, V> {
         private IteratorState<K, V> state;
 
         /**
+         * An iterator cannot be accesses concurrently by multiple threads.
+         * Thus, it is safe to have its own thread context.
+         */
+        protected ThreadContext ctx;
+
+        /**
          * Initializes ascending iterator for entire range.
          */
         Iter(K lo, boolean loInclusive, K hi, boolean hiInclusive, boolean isDescending) {
@@ -1121,9 +1126,8 @@ class InternalOakMap<K, V> {
             this.hi = hi;
             this.hiInclusive = hiInclusive;
             this.isDescending = isDescending;
-
-            ThreadContext ctx = getThreadLocalContext();
-            initState(ctx, isDescending, lo, loInclusive, hi, hiInclusive);
+            this.ctx = new ThreadContext(-1, valueOperator);
+            initState(isDescending, lo, loInclusive, hi, hiInclusive);
 
         }
 
@@ -1152,7 +1156,7 @@ class InternalOakMap<K, V> {
             return (state != null);
         }
 
-        private void initAfterRebalance(ThreadContext ctx) {
+        private void initAfterRebalance() {
             //TODO - refactor to use ByeBuffer without deserializing.
             state.getChunk().readKeyFromEntryIndex(ctx.tempKey, state.getIndex());
             K nextKey = keySerializer.deserialize(ctx.tempKey.getDataByteBuffer().slice());
@@ -1166,7 +1170,7 @@ class InternalOakMap<K, V> {
             }
 
             // Update the state to point to last returned key.
-            initState(ctx, isDescending, lo, loInclusive, hi, hiInclusive);
+            initState(isDescending, lo, loInclusive, hi, hiInclusive);
 
             if (state == null) {
                 // There are no more elements in Oak after nextKey, so throw NoSuchElementException
@@ -1185,7 +1189,7 @@ class InternalOakMap<K, V> {
          * @return The first long is the key's reference, the integer is the value's version and the second long is
          * the value's reference. If {@code needsValue == false}, then the value of the map entry is {@code null}.
          */
-        void advance(ThreadContext ctx, boolean needsValue) {
+        void advance(boolean needsValue) {
             if (state == null) {
                 throw new NoSuchElementException();
             }
@@ -1193,7 +1197,7 @@ class InternalOakMap<K, V> {
             Chunk.State chunkState = state.getChunk().state();
 
             if (chunkState == Chunk.State.RELEASED) {
-                initAfterRebalance(ctx);
+                initAfterRebalance();
             }
 
             // build the entry context that sets key references and does not check for value validity.
@@ -1209,30 +1213,29 @@ class InternalOakMap<K, V> {
                     // The CAS could not complete due to concurrent rebalance, so rebalance and try again
                     if (!ctx.value.isValidVersion()) {
                         rebalance(state.getChunk());
-                        advance(ctx, true);
+                        advance(true);
                         return;
                     }
                     // If the value is deleted, advance to the next value
                     if (!ctx.isValueValid()) {
-                        advanceState(ctx);
-                        advance(ctx, true);
+                        advanceState();
+                        advance(true);
                         return;
                     }
                 } else {
-                    advanceState(ctx);
-                    advance(ctx, true);
+                    advanceState();
+                    advance(true);
                     return;
                 }
             }
-            advanceState(ctx);
+            advanceState();
         }
 
         /**
          * Advances next to the next entry without creating a ByteBuffer for the key.
          * Return previous index
          */
-        void advanceStream(ThreadContext ctx, OakDetachedReadBuffer<KeyBuffer> key,
-                           OakDetachedReadBuffer<ValueBuffer> value) {
+        void advanceStream(OakDetachedReadBuffer<KeyBuffer> key, OakDetachedReadBuffer<ValueBuffer> value) {
             assert key != null || value != null;
             if (state == null) {
                 throw new NoSuchElementException();
@@ -1242,7 +1245,7 @@ class InternalOakMap<K, V> {
             final Chunk.State chunkState = c.state();
 
             if (chunkState == Chunk.State.RELEASED) {
-                initAfterRebalance(ctx);
+                initAfterRebalance();
             }
 
             if (key != null) {
@@ -1252,16 +1255,16 @@ class InternalOakMap<K, V> {
             if (value != null) {
                 if (!state.getChunk().readValueFromEntryIndex(value.buffer, curIndex)) {
                     // If the current value is deleted, then advance and try again
-                    advanceState(ctx);
-                    advanceStream(ctx, key, value);
+                    advanceState();
+                    advanceStream(key, value);
                     return;
                 }
             }
 
-            advanceState(ctx);
+            advanceState();
         }
 
-        private void initState(ThreadContext ctx, boolean isDescending, K lowerBound, boolean lowerInclusive,
+        private void initState(boolean isDescending, K lowerBound, boolean lowerInclusive,
                                K upperBound, boolean upperInclusive) {
 
             Chunk.ChunkIter nextChunkIter;
@@ -1294,7 +1297,7 @@ class InternalOakMap<K, V> {
 
             //Init state, not valid yet, must move forward
             state = IteratorState.newInstance(nextChunk, nextChunkIter);
-            advanceState(ctx);
+            advanceState();
         }
 
         private Chunk<K, V> getNextChunk(Chunk<K, V> current) {
@@ -1311,7 +1314,7 @@ class InternalOakMap<K, V> {
             }
         }
 
-        private Chunk.ChunkIter getChunkIter(ThreadContext ctx, Chunk<K, V> current) {
+        private Chunk.ChunkIter getChunkIter(Chunk<K, V> current) {
             if (!isDescending) {
                 return current.ascendingIter();
             } else {
@@ -1319,7 +1322,7 @@ class InternalOakMap<K, V> {
             }
         }
 
-        private void advanceState(ThreadContext ctx) {
+        private void advanceState() {
 
             Chunk<K, V> chunk = state.getChunk();
             Chunk.ChunkIter chunkIter = state.getChunkIter();
@@ -1331,7 +1334,7 @@ class InternalOakMap<K, V> {
                     state = null;
                     return;
                 }
-                chunkIter = getChunkIter(ctx, chunk);
+                chunkIter = getChunkIter(chunk);
             }
 
             int nextIndex = chunkIter.next(ctx);
@@ -1361,8 +1364,7 @@ class InternalOakMap<K, V> {
 
         @Override
         public OakDetachedBuffer next() {
-            ThreadContext ctx = getThreadLocalContext();
-            advance(ctx, true);
+            advance(true);
             return getValueDetachedBuffer(ctx);
         }
     }
@@ -1377,8 +1379,7 @@ class InternalOakMap<K, V> {
 
         @Override
         public OakDetachedBuffer next() {
-            ThreadContext ctx = getThreadLocalContext();
-            advanceStream(ctx, null, value);
+            advanceStream(null, value);
             return value;
         }
     }
@@ -1394,8 +1395,7 @@ class InternalOakMap<K, V> {
         }
 
         public T next() {
-            ThreadContext ctx = getThreadLocalContext();
-            advance(ctx, true);
+            advance(true);
             Result res = valueOperator.transform(ctx.result, ctx.value, transformer);
             // If this value is deleted, try the next one
             if (res.operationResult == FALSE) {
@@ -1425,8 +1425,7 @@ class InternalOakMap<K, V> {
         }
 
         public Map.Entry<OakDetachedBuffer, OakDetachedBuffer> next() {
-            ThreadContext ctx = getThreadLocalContext();
-            advance(ctx, true);
+            advance(true);
             return new AbstractMap.SimpleImmutableEntry<>(getKeyDetachedBuffer(ctx), getValueDetachedBuffer(ctx));
         }
     }
@@ -1441,8 +1440,7 @@ class InternalOakMap<K, V> {
         }
 
         public Map.Entry<OakDetachedBuffer, OakDetachedBuffer> next() {
-            ThreadContext ctx = getThreadLocalContext();
-            advanceStream(ctx, key, value);
+            advanceStream(key, value);
             return this;
         }
 
@@ -1474,8 +1472,7 @@ class InternalOakMap<K, V> {
         }
 
         public T next() {
-            ThreadContext ctx = getThreadLocalContext();
-            advance(ctx, true);
+            advance(true);
             ValueUtils.ValueResult res = valueOperator.lockRead(ctx.value);
             ByteBuffer serializedValue;
             if (res == FALSE) {
@@ -1508,8 +1505,7 @@ class InternalOakMap<K, V> {
 
         @Override
         public OakDetachedBuffer next() {
-            ThreadContext ctx = getThreadLocalContext();
-            advance(ctx, false);
+            advance(false);
             return getKeyDetachedBuffer(ctx);
 
         }
@@ -1525,8 +1521,7 @@ class InternalOakMap<K, V> {
 
         @Override
         public OakDetachedBuffer next() {
-            ThreadContext ctx = getThreadLocalContext();
-            advanceStream(ctx, key, null);
+            advanceStream(key, null);
             return key;
         }
     }
@@ -1542,8 +1537,7 @@ class InternalOakMap<K, V> {
         }
 
         public T next() {
-            ThreadContext ctx = getThreadLocalContext();
-            advance(ctx, false);
+            advance(false);
             return transformer.apply(ctx.key.getDuplicatedReadByteBuffer());
         }
     }
