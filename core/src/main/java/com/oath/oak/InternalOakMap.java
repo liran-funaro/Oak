@@ -729,7 +729,7 @@ class InternalOakMap<K, V> {
             assert ctx.entryIndex > 0;
             assert ctx.value.isAllocated();
 
-            lookUp.isFinalizeDeletionNeeded = true;
+            ctx.valueState = EntrySet.ValueState.DELETED_NOT_FINALIZED;
             // publish
             if (c.finalizeDeletion(ctx)) {
                 rebalance(c);
