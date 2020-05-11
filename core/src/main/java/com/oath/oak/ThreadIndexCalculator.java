@@ -34,7 +34,10 @@ class ThreadIndexCalculator {
     }
 
     public int getIndex() {
-        long tid = Thread.currentThread().getId();
+        return getIndex(Thread.currentThread().getId());
+    }
+
+    public int getIndex(long tid) {
         int threadIdx = getExistingIndex(tid);
         if (threadIdx > 0) {
             return threadIdx;
