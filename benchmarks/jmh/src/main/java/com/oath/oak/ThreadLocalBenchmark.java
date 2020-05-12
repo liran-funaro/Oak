@@ -16,6 +16,12 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
+@Warmup(iterations = 2, time = 30)
+@Measurement(iterations = 3, time = 30)
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.MICROSECONDS)
+@Fork(value = 1)
+@Threads(12)
 @State(Scope.Benchmark)
 public class ThreadLocalBenchmark
 {
@@ -47,8 +53,12 @@ public class ThreadLocalBenchmark
         final ThreadIndexCalculator contextThreadIndexCalculator = ThreadIndexCalculator.newInstance();
         final ThreadContext[] threadLocalContext = new ThreadContext[ThreadIndexCalculator.MAX_THREADS];
 
+        protected int getIndex(long tid) {
+            return contextThreadIndexCalculator.getIndex();
+        }
+
         public ThreadContext get(long tid) {
-            int threadIndex = contextThreadIndexCalculator.getIndex();
+            int threadIndex = getIndex(tid);
             ThreadContext ret = threadLocalContext[threadIndex];
             if (ret == null) {
                 ret = new ThreadContext(threadIndex, v);
@@ -56,6 +66,13 @@ public class ThreadLocalBenchmark
             }
             ret.invalidate();
             return ret;
+        }
+    }
+
+    static class IndexCalculatorRandID extends IndexCalculator {
+        @Override
+        protected int getIndex(long tid) {
+            return contextThreadIndexCalculator.getIndex(tid);
         }
     }
 
@@ -67,13 +84,14 @@ public class ThreadLocalBenchmark
                 return new JavaThreadLocal();
             case "index-calc":
                 return new IndexCalculator();
+            case "index-calc-rand-id":
+                return new IndexCalculatorRandID();
             default:
                 throw new IllegalArgumentException();
         }
     }
 
-    // /usr/bin/java -jar benchmarks/jmh/target/benchmarks-jmh.jar getThreadLocal
-    @Param({"new", "java", "index-calc"})
+    @Param({"new", "java", "index-calc", "index-calc-rand-id"})
     private String impl;
 
     private LocalThreadContext l;
@@ -101,32 +119,50 @@ public class ThreadLocalBenchmark
     public static class ThreadState {
         public long tid;
 
+        int[] cache = new int[1<<10];
+
         @Setup(Level.Iteration)
         public void setup() {
             tid = s_random.get().nextInt(1<<16);
         }
+
+        @Setup(Level.Invocation)
+        public void cleanCache(Blackhole blackhole) {
+            for (int i = 0; i < cache.length; i++) {
+                cache[i] = s_random.get().nextInt();
+                blackhole.consume(cache[i]);
+            }
+        }
     }
 
-    @Warmup(iterations = 5)
-    @Measurement(iterations = 10)
-    @BenchmarkMode(Mode.AverageTime)
-    @OutputTimeUnit(TimeUnit.MICROSECONDS)
-    @Fork(value = 1)
-    @Threads(12)
+
     @Benchmark
     public void getThreadLocal(Blackhole blackhole, ThreadState s) {
         ThreadContext ctx = l.get(s.tid);
         blackhole.consume(ctx);
     }
 
+    @Benchmark
+    public void getThreadLocalAndUse(Blackhole blackhole, ThreadState s) {
+        ThreadContext ctx = l.get(s.tid);
+        blackhole.consume(ctx.entryIndex);
+        blackhole.consume(ctx.key.blockID);
+        blackhole.consume(ctx.value.blockID);
+        blackhole.consume(ctx.valueState);
+        blackhole.consume(ctx.newValue.blockID);
+        blackhole.consume(ctx.isNewValueForMove);
+        blackhole.consume(ctx.result.operationResult);
+        blackhole.consume(ctx.tempKey.blockID);
+        blackhole.consume(ctx.tempValue.blockID);
+    }
+
+    // /usr/bin/java -jar benchmarks/jmh/target/benchmarks-jmh.jar -si false ThreadLocalBenchmark
     public static void main(String[] args) throws RunnerException {
         Options opt = new OptionsBuilder()
-                .include("getThreadLocal")
+                .include("ThreadLocalBenchmark")
                 .forks(0)
-                .threads(12)
                 .build();
 
         new Runner(opt).run();
     }
-
 }
