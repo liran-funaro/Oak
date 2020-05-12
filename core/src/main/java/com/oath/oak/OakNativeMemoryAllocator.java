@@ -51,8 +51,12 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
     // list, each thread has a dummy free chunk to find free chunk to reuse.
     // The id of the dummy is invalid so all the free chunks with greater or equal length are after the dummy
     // according to the sorting function.
-    private final FreeSlice[] dummies = new FreeSlice[ThreadIndexCalculator.MAX_THREADS];
-    private final ThreadIndexCalculator threadIndexCalculator = ThreadIndexCalculator.newInstance();
+    private final DisposableThreadLocal<FreeSlice> dummies = new DisposableThreadLocal<FreeSlice>() {
+        @Override
+        FreeSlice initObject(long tid) {
+            return new FreeSlice();
+        }
+    };
 
     private final BlocksProvider blocksProvider;
     private Block currentBlock;
@@ -88,9 +92,6 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
         // this may lazy initialize the pool and take time if this is the first call for the pool
         allocateNewCurrentBlock();
         this.capacity = capacity;
-        for (int i = 0; i < ThreadIndexCalculator.MAX_THREADS; i++) {
-            dummies[i] = new FreeSlice();
-        }
     }
 
     // Allocates ByteBuffer of the given size, either from freeList or (if it is still possible)
@@ -98,8 +99,7 @@ class OakNativeMemoryAllocator implements OakBlockMemoryAllocator {
     // Otherwise, new block is allocated within Oak memory bounds. Thread safe.
     @Override
     public boolean allocate(Slice s, int size, MemoryManager.Allocate allocate) {
-
-        FreeSlice myDummy = dummies[threadIndexCalculator.getIndex()];
+        FreeSlice myDummy = dummies.get();
         // While the free list is not empty there can be a suitable free chunk to reuse.
         // To search a free chunk, all a thread has to do is to change the length of its dummy and use
         // skiplist.higher(myDummy) which returns a free chunk with greater or equal length to the length of the

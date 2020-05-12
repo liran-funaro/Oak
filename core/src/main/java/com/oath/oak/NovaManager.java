@@ -7,17 +7,25 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 class NovaManager implements MemoryManager {
     static final int RELEASE_LIST_LIMIT = 1024;
-    private ThreadIndexCalculator threadIndexCalculator;
-    private List<List<Slice>> releaseLists;
+    private DisposableThreadLocal<List<Slice>> releaseLists = new DisposableThreadLocal<List<Slice>>() {
+        @Override
+        List<Slice> initObject(long tid) {
+            return new ArrayList<>(RELEASE_LIST_LIMIT);
+        }
+
+        @Override
+        void dispose(List<Slice>[] oldObjects) {
+            for (List<Slice> o : oldObjects) {
+                if (o != null) {
+                    releaseList(o);
+                }
+            }
+        }
+    };
     private AtomicInteger globalNovaNumber;
     private OakBlockMemoryAllocator allocator;
 
     NovaManager(OakBlockMemoryAllocator allocator) {
-        this.threadIndexCalculator = ThreadIndexCalculator.newInstance();
-        this.releaseLists = new CopyOnWriteArrayList<>();
-        for (int i = 0; i < ThreadIndexCalculator.MAX_THREADS; i++) {
-            this.releaseLists.add(new ArrayList<>(RELEASE_LIST_LIMIT));
-        }
         globalNovaNumber = new AtomicInteger(1);
         this.allocator = allocator;
     }
@@ -51,16 +59,19 @@ class NovaManager implements MemoryManager {
 
     @Override
     public void release(Slice s) {
-        int idx = threadIndexCalculator.getIndex();
-        List<Slice> myReleaseList = this.releaseLists.get(idx);
-        myReleaseList.add(new Slice(s));
-        if (myReleaseList.size() >= RELEASE_LIST_LIMIT) {
-            globalNovaNumber.incrementAndGet();
-            for (Slice allocToRelease : myReleaseList) {
-                allocator.free(allocToRelease);
-            }
-            myReleaseList.clear();
+        List<Slice> curReleaseList = releaseLists.get();
+        curReleaseList.add(new Slice(s));
+        if (curReleaseList.size() >= RELEASE_LIST_LIMIT) {
+            releaseList(curReleaseList);
         }
+    }
+
+    void releaseList(List<Slice> slices) {
+        globalNovaNumber.incrementAndGet();
+        for (Slice allocToRelease : slices) {
+            allocator.free(allocToRelease);
+        }
+        slices.clear();
     }
 
     @Override

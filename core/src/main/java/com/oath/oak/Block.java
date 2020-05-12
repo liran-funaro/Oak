@@ -25,15 +25,17 @@ class Block {
     // (for example binary search through the keys)
     // keep persistent ByteBuffer objects referring to a slice from a Block's big underlying buffer
     // in order to make it thread-safe keep separate persistent ByteBuffer per thread
-    private ThreadIndexCalculator threadIndexCalculator;
-    private ByteBuffer[] byteBufferPerThread;
+    private DisposableThreadLocal<ByteBuffer> byteBufferPerThread = new DisposableThreadLocal<ByteBuffer>() {
+        @Override
+        ByteBuffer initObject(long tid) {
+            return buffer.duplicate();
+        }
+    };
 
     Block(long capacity) {
         assert capacity > 0;
         assert capacity <= Integer.MAX_VALUE; // This is exactly 2GB
         this.capacity = (int) capacity;
-        this.threadIndexCalculator = ThreadIndexCalculator.newInstance();
-        this.byteBufferPerThread = new ByteBuffer[ThreadIndexCalculator.MAX_THREADS];
         this.id = INVALID_BLOCK_ID;
         // Pay attention in allocateDirect the data is *zero'd out*
         // which has an overhead in clearing and you end up touching every page
@@ -66,7 +68,7 @@ class Block {
     void reset() {
         buffer.clear(); // reset the position
         allocated.set(0);
-        this.threadIndexCalculator = ThreadIndexCalculator.newInstance();
+        byteBufferPerThread.reset();
     }
 
     // return how many bytes are actually allocated for this block only, thread safe
@@ -95,16 +97,11 @@ class Block {
     }
 
     private ByteBuffer getMyBuffer() {
-        int idx = threadIndexCalculator.getIndex();
-        if (byteBufferPerThread[idx] == null) {
-            // the new buffer object is needed for thread safeness, otherwise
-            // (in single threaded environment)
-            // the setting of position and limit could happen on the main buffer itself
-            // but it happens only once per thread id
-            byteBufferPerThread[idx] = buffer.duplicate();
-        }
-
-        return byteBufferPerThread[idx];
+        // the new buffer object is needed for thread safeness, otherwise
+        // (in single threaded environment)
+        // the setting of position and limit could happen on the main buffer itself
+        // but it happens only once per thread id
+        return byteBufferPerThread.get();
     }
 
     void getBufferForThread(Slice s) {

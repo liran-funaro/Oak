@@ -144,20 +144,19 @@ class InternalOakMap<K, V> {
     /*-------------- Context --------------*/
 
     // This array holds for each thread a context instance to avoid redundant instantiation and GC.
-    private final ThreadContext[] threadLocalContext = new ThreadContext[ThreadIndexCalculator.MAX_THREADS];
-    private final ThreadIndexCalculator contextThreadIndexCalculator = ThreadIndexCalculator.newInstance();
+    private final DisposableThreadLocal<ThreadContext> threadLocalContext = new DisposableThreadLocal<ThreadContext>() {
+        @Override
+        ThreadContext initObject(long tid) {
+            return new ThreadContext((int) tid, valueOperator);
+        }
+    };
 
     /**
      * Should only be called from API methods at the beginning of the method and be reused in internal calls.
      * @return a thread-local context instance.
      */
     ThreadContext getThreadLocalContext() {
-        int threadIndex = contextThreadIndexCalculator.getIndex();
-        ThreadContext ret = threadLocalContext[threadIndex];
-        if (ret == null) {
-            ret = new ThreadContext(threadIndex, valueOperator);
-            threadLocalContext[threadIndex] = ret;
-        }
+        ThreadContext ret = threadLocalContext.get();
         ret.invalidate();
         return ret;
     }
