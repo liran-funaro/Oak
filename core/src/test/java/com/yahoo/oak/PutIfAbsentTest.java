@@ -45,7 +45,7 @@ public class PutIfAbsentTest {
     }
 
 
-    @Test(timeout = 10_000)
+    @Test(timeout = 60_000)
     public void testConcurrentPutOrCompute() {
         ExecutorService executor = Executors.newFixedThreadPool(NUM_THREADS);
 
@@ -98,7 +98,7 @@ public class PutIfAbsentTest {
     }
 
 
-    @Test(timeout = 10_000)
+    @Test(timeout = 60_000)
     public void testConcurrentPutIfAbsent() {
         ExecutorService executor = Executors.newFixedThreadPool(NUM_THREADS);
 
