@@ -6,12 +6,14 @@
 
 package com.yahoo.oak;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-class NativeMemoryAllocator implements BlockMemoryAllocator {
+public class NativeMemoryAllocator implements BlockMemoryAllocator {
 
     // When allocating n bytes and there are buffers in the free list, only free buffers of size <= n *
     // REUSE_MAX_MULTIPLIER will be recycled
@@ -47,14 +49,16 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
     // flag allowing not to close the same allocator twice
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
+    private final Set<Object> owners = new HashSet<>();
+
     // constructor
     // input param: memory capacity given to this Oak. Uses default BlocksPool
-    NativeMemoryAllocator(long capacity) {
+    public NativeMemoryAllocator(long capacity) {
         this(capacity, BlocksPool.getInstance());
     }
 
     // A testable constructor
-    NativeMemoryAllocator(long capacity, BlocksProvider blocksProvider) {
+    public NativeMemoryAllocator(long capacity, BlocksProvider blocksProvider) {
         this.blocksProvider = blocksProvider;
         int blockArraySize = ((int) (capacity / blocksProvider.blockSize())) + 1;
         // first entry of blocksArray is always empty
@@ -63,6 +67,19 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
         // this may lazy initialize the pool and take time if this is the first call for the pool
         allocateNewCurrentBlock();
         this.capacity = capacity;
+    }
+
+    @Override
+    public void addOwner(Object owner) {
+        owners.add(owner);
+    }
+
+    @Override
+    public void releaseOwner(Object owner) {
+        owners.remove(owner);
+        if (owners.size() == 0) {
+            close();
+        }
     }
 
     // Allocates ByteBuffer of the given size, either from freeList or (if it is still possible)

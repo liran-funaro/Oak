@@ -26,11 +26,12 @@ class NovaManager implements MemoryManager {
         }
         globalNovaNumber = new AtomicInteger(1);
         this.allocator = allocator;
+        allocator.addOwner(this);
     }
 
     @Override
     public void close() {
-        allocator.close();
+        allocator.releaseOwner(this);
     }
 
     @Override
