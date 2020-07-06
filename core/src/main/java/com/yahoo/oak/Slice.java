@@ -154,7 +154,7 @@ class Slice implements OakUnsafeDirectBuffer, Comparable<Slice> {
 
     @Override
     public ByteBuffer getByteBuffer() {
-        return readBuffer;
+        return writeBuffer;
     }
 
     @Override
