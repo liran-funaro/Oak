@@ -50,5 +50,10 @@ class NoFreeMemoryManager implements MemoryManager {
     public int getCurrentVersion() {
         return 0;
     }
+
+    @Override
+    public int getMaxBlockSize() {
+        return keysMemoryAllocator.getMaxBlockSize();
+    }
 }
 

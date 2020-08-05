@@ -20,10 +20,9 @@ class Block {
     private final AtomicInteger allocated = new AtomicInteger(0);
     private int id; // placeholder might need to be set in the future
 
-    Block(long capacity) {
+    Block(int capacity) {
         assert capacity > 0;
-        assert capacity <= Integer.MAX_VALUE; // This is exactly 2GB
-        this.capacity = (int) capacity;
+        this.capacity = capacity;
         this.id = NativeMemoryAllocator.INVALID_BLOCK_ID;
         // Pay attention in allocateDirect the data is *zero'd out*
         // which has an overhead in clearing and you end up touching every page
@@ -40,7 +39,8 @@ class Block {
         int now = allocated.getAndAdd(size);
         if (now + size > this.capacity) {
             allocated.getAndAdd(-size);
-            throw new OakOutOfMemoryException();
+            throw new OakOutOfMemoryException(
+                    String.format("This block capacity was exceeded (capacity: %s).", capacity));
         }
         s.update(id, now, size);
         readByteBuffer(s);

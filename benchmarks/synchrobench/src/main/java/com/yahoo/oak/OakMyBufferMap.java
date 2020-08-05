@@ -14,7 +14,6 @@ import java.util.Iterator;
 
 public class OakMyBufferMap<K extends MyBuffer, V extends MyBuffer> implements CompositionalOakMap<K, V> {
     private OakMap<MyBuffer, MyBuffer> oak;
-    private OakMapBuilder<MyBuffer, MyBuffer> builder;
     private MyBuffer minKey;
     private NativeMemoryAllocator ma;
     private static final long KB = 1024L;
@@ -22,18 +21,26 @@ public class OakMyBufferMap<K extends MyBuffer, V extends MyBuffer> implements C
     private static final long OAK_MAX_OFF_MEMORY = 256 * GB;
 
     public OakMyBufferMap() {
-        ma = new NativeMemoryAllocator(OAK_MAX_OFF_MEMORY);
+        clear();
+    }
+
+    @Override
+    public void clear() {
+        if (oak != null) {
+            oak.close();
+        }
+
+        ma = new NativeMemoryAllocator(OAK_MAX_OFF_MEMORY, 1024, 256 * (1 << 20));
         if (Parameters.detailedStats) {
             ma.collectStats();
         }
         minKey = new MyBuffer(Integer.BYTES);
         minKey.buffer.putInt(0, Integer.MIN_VALUE);
-        builder =
-            new OakMapBuilder<MyBuffer, MyBuffer>(
+        oak = new OakMapBuilder<>(
                 MyBuffer.DEFAULT_COMPARATOR, MyBuffer.DEFAULT_SERIALIZER, MyBuffer.DEFAULT_SERIALIZER, minKey)
                 .setChunkMaxItems(Chunk.MAX_ITEMS_DEFAULT)
-                .setMemoryAllocator(ma);
-        oak = builder.build();
+                .setMemoryAllocator(ma)
+                .build();
     }
 
     public long allocated() {
@@ -123,24 +130,6 @@ public class OakMyBufferMap<K extends MyBuffer, V extends MyBuffer> implements C
             iter.next();
         }
         return i == length;
-    }
-
-    @Override
-    public void clear() {
-        oak.close();
-
-        ma = new NativeMemoryAllocator((long) Integer.MAX_VALUE * 32);
-        if (Parameters.detailedStats) {
-            ma.collectStats();
-        }
-        minKey = new MyBuffer(Integer.BYTES);
-        minKey.buffer.putInt(0, Integer.MIN_VALUE);
-        builder =
-            new OakMapBuilder<MyBuffer, MyBuffer>(
-                MyBuffer.DEFAULT_COMPARATOR, MyBuffer.DEFAULT_SERIALIZER, MyBuffer.DEFAULT_SERIALIZER, minKey)
-                .setChunkMaxItems(Chunk.MAX_ITEMS_DEFAULT)
-                .setMemoryAllocator(ma);
-        oak = builder.build();
     }
 
     @Override

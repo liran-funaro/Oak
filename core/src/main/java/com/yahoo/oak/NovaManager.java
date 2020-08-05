@@ -73,4 +73,9 @@ class NovaManager implements MemoryManager {
     public void readByteBuffer(Slice s) {
         allocator.readByteBuffer(s);
     }
+
+    @Override
+    public int getMaxBlockSize() {
+        return allocator.getMaxBlockSize();
+    }
 }

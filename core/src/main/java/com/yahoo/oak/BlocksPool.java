@@ -8,6 +8,8 @@ package com.yahoo.oak;
 
 import java.io.Closeable;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Stream;
 
 /**
  * The singleton Pool to pre-allocate and reuse blocks of off-heap memory. The singleton has lazy
@@ -18,56 +20,45 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 final class BlocksPool implements BlocksProvider, Closeable {
 
     private static BlocksPool instance = null;
-    private final ConcurrentLinkedQueue<Block> blocks = new ConcurrentLinkedQueue<>();
+
+    // Blocks can only be allocated as a power of two.
+    public static final int BLOCK_SIZE_BASE = 2;
+
+    // Anything lower than 1 byte is meaningless
+    static final int MIN_BLOCK_SIZE = 1;
+
+    // Integer is limited to 32 bits; one bit is for sign.
+    static final int MAX_BLOCK_SIZE = 1 << (Integer.SIZE - 2);
+
+    static final long GB = 1L << 30;
 
     // TODO change the following constants to be configurable
 
-    static final long MB = 1L << 20;
-    static final long GB = 1L << 30;
+    // Upper/lower thresholds to the quantity of the cached blocks to reserve in the pool for future use.
+    // When the cached memory quantity reaches upperCacheThresholdBytes, some blocks are freed
+    // such that the remaining cached memory will be at most lowerCacheThresholdBytes.
+    private static final long DEFAULT_LOWER_CACHE_THRESHOLD_BYTES = 2L * GB;
+    private static final long DEFAULT_UPPER_CACHE_THRESHOLD_BYTES = 4L * GB;
 
-    // The memory size to pre-allocate on initialization.
-    private static final long PRE_ALLOC_SIZE_BYTES = 0;
+    private final long lowerCacheThresholdBytes;
+    private final long upperCacheThresholdBytes;
+    private final ConcurrentLinkedQueue<Block>[] blockPools;
 
-    // The minimal memory size to be allocated at once when not enough memory is available.
-    // If the used block size is larger than this number, exactly one block will be allocated.
-    // Otherwise, more than one block might be allocated at once.
-    private static final long NEW_ALLOC_MIN_SIZE_BYTES = 8L * MB;
+    private final AtomicLong allocatedBytes = new AtomicLong(0);
+    private final AtomicLong cachedBytes = new AtomicLong(0);
 
-    // Upper/lower thresholds to the quantity of the unused memory to reserve in the pool for future use.
-    // When the unused memory quantity reaches HIGH_RESERVED_SIZE_BYTES, some memory is freed
-    // such that the remaining unused memory will be LOW_RESERVED_SIZE_BYTES.
-    private static final long LOW_RESERVED_SIZE_BYTES = 2L * GB;
-    private static final long HIGH_RESERVED_SIZE_BYTES = 4L * GB;
-
-    // The default size of a single memory block to be allocated at once.
-    static final int DEFAULT_BLOCK_SIZE_BYTES = 256 * (int) MB;
-
-    /**
-     * The block size in bytes that is used by this pool.
-     * It is limited to an integer duo to similar limitation of {@code ByteBuffer::allocateDirect(int capacity)}.
-     */
-    private final int blockSizeBytes;
-
-    private final int newAllocBlocks;
-    private final int lowReservedBlocks;
-    private final int highReservedBlocks;
-
-    // not thread safe, private constructor; should be called only once
-    private BlocksPool() {
-        this(DEFAULT_BLOCK_SIZE_BYTES);
+    BlocksPool() {
+        this(DEFAULT_LOWER_CACHE_THRESHOLD_BYTES, DEFAULT_UPPER_CACHE_THRESHOLD_BYTES);
     }
 
     // Used internally and for tests.
-    private BlocksPool(int blockSizeBytes) {
-        this.blockSizeBytes = blockSizeBytes;
-        this.newAllocBlocks = convertSizeToBlocks(NEW_ALLOC_MIN_SIZE_BYTES, 1);
-        this.lowReservedBlocks = convertSizeToBlocks(LOW_RESERVED_SIZE_BYTES, 0);
-        this.highReservedBlocks = convertSizeToBlocks(HIGH_RESERVED_SIZE_BYTES, this.lowReservedBlocks + 1);
-        alloc(convertSizeToBlocks(PRE_ALLOC_SIZE_BYTES, 0));
-    }
-
-    private int convertSizeToBlocks(long sizeBytes, int minBlocks) {
-        return Math.max(minBlocks, (int) Math.ceil((float) sizeBytes / (float) blockSizeBytes));
+    BlocksPool(long lowerCacheThresholdBytes, long upperCacheThresholdBytes) {
+        this.lowerCacheThresholdBytes = lowerCacheThresholdBytes;
+        this.upperCacheThresholdBytes = upperCacheThresholdBytes;
+        this.blockPools = new ConcurrentLinkedQueue[Integer.SIZE];
+        for (int i = 0; i < blockPools.length; i++) {
+            blockPools[i] = new ConcurrentLinkedQueue<>();
+        }
     }
 
     /**
@@ -85,36 +76,23 @@ final class BlocksPool implements BlocksProvider, Closeable {
         return instance;
     }
 
-    // used only in OakNativeMemoryAllocatorTest.java
-    static void setBlockSize(int blockSize) {
-        synchronized (BlocksPool.class) { // can be easily changed to lock-free
-            if (instance != null) {
-                instance.close();
-            }
-            instance = new BlocksPool(blockSize);
-        }
-    }
-
     /**
-     * Sets the preferred block size. This only has an effect if the block pool was never used before.
-     * @param preferredBlockSizeBytes the preferred block size
-     * @return true if the preferred block size matches the current instance
+     * Taken from: org.apache.datasketches.Util
+     * Computes the ceiling power of 2 within the range [1, 2^30]. This is the smallest positive power
+     * of 2 that equal to or greater than the given n and equal to a mathematical integer.
+     *
+     * @param n The input argument.
+     * @return the ceiling power of 2.
      */
-    static boolean preferBlockSize(int preferredBlockSizeBytes) {
-        if (instance == null) {
-            synchronized (BlocksPool.class) { // can be easily changed to lock-free
-                if (instance == null) {
-                    instance = new BlocksPool(preferredBlockSizeBytes);
-                }
-            }
-        }
-
-        return instance.blockSizeBytes == preferredBlockSizeBytes;
+    public static int ceilingBlockSizePowerOf2(final int n) {
+        validateBlockSize(n);
+        return Integer.highestOneBit((n - 1) << 1);
     }
 
-    @Override
-    public int blockSize() {
-        return blockSizeBytes;
+    public static void validateBlockSize(final int n) {
+        if (n < MIN_BLOCK_SIZE || n > MAX_BLOCK_SIZE) {
+            throw new IllegalArgumentException(String.format("Illegal block size: %s", n));
+        }
     }
 
     /**
@@ -122,23 +100,44 @@ final class BlocksPool implements BlocksProvider, Closeable {
      * Thread-safe
      */
     @Override
-    public Block getBlock() {
-        Block b = null;
-        while (b == null) {
-            boolean noMoreBlocks = blocks.isEmpty();
-            if (!noMoreBlocks) {
-                b = blocks.poll();
-            }
+    public Block getBlock(int requiredSize) {
+        int allocatedSize = ceilingBlockSizePowerOf2(requiredSize);
+        // poolNum is a number between 0 to 31 due to the limitation of Integer.
+        // 0 corresponds to the largest block size, and 31 to the smallest.
+        int poolNum = Integer.numberOfLeadingZeros(allocatedSize);
+        ConcurrentLinkedQueue<Block> pool = blockPools[poolNum];
 
-            if (noMoreBlocks || b == null) {
-                synchronized (BlocksPool.class) { // can be easily changed to lock-free
-                    if (blocks.isEmpty()) {
-                        alloc(newAllocBlocks);
-                    }
-                }
-            }
+        Block b = pool.poll();
+        if (b != null) {
+            cachedBytes.addAndGet(-b.getCapacity());
+        } else {
+            // The blocks are allocated without ids.
+            // They are given an id when they are given to an OakNativeMemoryAllocator.
+            b = new Block(allocatedSize);
+            allocatedBytes.addAndGet(allocatedSize);
         }
         return b;
+    }
+
+    private synchronized void cleanup() {
+        if (cachedBytes.get() <= upperCacheThresholdBytes) { // too many cached blocks
+            return;
+        }
+
+        // Iteration order is from the largest to the smallest buffer
+        for (ConcurrentLinkedQueue<Block> pool : blockPools) {
+            while (!pool.isEmpty()) {
+                if (cachedBytes.get() <= lowerCacheThresholdBytes) {
+                    return;
+                }
+
+                Block releasedBlock = pool.poll();
+                releasedBlock.clean();
+                int releasedBlockSize = releasedBlock.getCapacity();
+                cachedBytes.addAndGet(-releasedBlockSize);
+                allocatedBytes.addAndGet(-releasedBlockSize);
+            }
+        }
     }
 
     /**
@@ -148,40 +147,43 @@ final class BlocksPool implements BlocksProvider, Closeable {
     @Override
     public void returnBlock(Block b) {
         b.reset();
-        blocks.add(b);
-        if (blocks.size() > highReservedBlocks) { // too many unused blocks
-            synchronized (BlocksPool.class) { // can be easily changed to lock-free
-                while (blocks.size() > lowReservedBlocks) {
-                    this.blocks.poll().clean();
-                }
-            }
-        }
+
+        int blockSize = b.getCapacity();
+
+        int poolNum = Integer.numberOfLeadingZeros(blockSize);
+        ConcurrentLinkedQueue<Block> curPool = blockPools[poolNum];
+
+        curPool.add(b);
+        cachedBytes.addAndGet(blockSize);
+
+        cleanup();
     }
 
     /**
      * Should be called when the entire Pool is not used anymore. Releases the memory only of the
      * blocks returned back to the pool.
-     * However this object is GCed when the entire process dies, but thus all the memory is released
-     * anyway...
+     * However, this object is GCed when the entire process dies, and thus all the memory is released
+     * anyway.
      */
     @Override
     public void close() {
-        while (!blocks.isEmpty()) {
-            blocks.poll().clean();
-        }
-    }
-
-    private void alloc(int numOfBlocks) {
-        // pre-allocation loop
-        for (int i = 0; i < numOfBlocks; i++) {
-            // The blocks are allocated without ids.
-            // They are given an id when they are given to an OakNativeMemoryAllocator.
-            this.blocks.add(new Block(blockSizeBytes));
+        for (ConcurrentLinkedQueue<Block> pool : blockPools) {
+            while (!pool.isEmpty()) {
+                pool.poll().clean();
+            }
         }
     }
 
     // used only for testing
     int numOfRemainingBlocks() {
-        return blocks.size();
+        return Stream.of(blockPools).mapToInt(ConcurrentLinkedQueue::size).sum();
+    }
+
+    long getAllocatedBytes() {
+        return allocatedBytes.get();
+    }
+
+    long getCachedBytes() {
+        return cachedBytes.get();
     }
 }

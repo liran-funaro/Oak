@@ -146,8 +146,8 @@ class EntrySet<K, V> {
          * From that, we can derive that the maximal number of 1K items that can be allocated is ~128 million (2^26).
          * Note: these limitations will change for different block sizes.
          */
-        final long blockSize = BlocksPool.getInstance().blockSize();
-        this.referenceCodec = new ReferenceCodec(blockSize, blockSize);
+        final long maxBlockSize = memoryManager.getMaxBlockSize();
+        this.referenceCodec = new ReferenceCodec(maxBlockSize, maxBlockSize);
     }
 
     enum ValueState {

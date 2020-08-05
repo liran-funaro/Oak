@@ -140,6 +140,7 @@ public class Test {
 
         } catch (Exception e) {
             System.err.println("Cannot find benchmark class: " + benchName);
+            e.printStackTrace();
             System.exit(-1);
         }
     }

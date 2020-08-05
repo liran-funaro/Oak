@@ -33,4 +33,7 @@ interface BlockMemoryAllocator {
 
     // Check if this Allocator was already closed
     boolean isClosed();
+
+    // Returns the maximal block size that can be allocated
+    int getMaxBlockSize();
 }

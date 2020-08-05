@@ -8,9 +8,7 @@ package com.yahoo.oak;
 
 import com.yahoo.oak.common.OakCommonBuildersFactory;
 import com.yahoo.oak.common.integer.OakIntSerializer;
-import org.junit.After;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
 
@@ -23,6 +21,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 public class NativeMemoryAllocatorTest {
+    static final int DEFAULT_BLOCK_SIZE_BYTES = 8 * 1024 * 1024;
     static final int VALUE_SIZE_AFTER_SERIALIZATION = 4 * 1024 * 1024;
     static final int KEYS_SIZE_AFTER_SERIALIZATION = Integer.BYTES;
 
@@ -42,21 +41,20 @@ public class NativeMemoryAllocatorTest {
     @Test
     public void allocateContention() throws InterruptedException {
         Random random = new Random();
-        long capacity = 100;
+        long capacity = 128;
         int blockSize = 8;
         int buffersPerBlock = 2;
         List<Block> blocks = Collections.synchronizedList(new ArrayList<>());
         int allocationSize = blockSize / buffersPerBlock;
 
         BlocksProvider mockProvider = Mockito.mock(BlocksProvider.class);
-        Mockito.when(mockProvider.blockSize()).thenReturn(blockSize);
-        Mockito.when(mockProvider.getBlock()).thenAnswer(invocation -> {
+        Mockito.when(mockProvider.getBlock(Mockito.anyInt())).thenAnswer(invocation -> {
             Thread.sleep(random.nextInt(500));
-            Block newBlock = new Block(blockSize);
+            Block newBlock = new Block(invocation.getArgument(0));
             blocks.add(newBlock);
             return newBlock;
         });
-        NativeMemoryAllocator allocator = new NativeMemoryAllocator(capacity, mockProvider);
+        NativeMemoryAllocator allocator = new NativeMemoryAllocator(mockProvider, capacity, blockSize, blockSize);
 
         int numAllocators = 10;
         ArrayList<Thread> threads = new ArrayList<>();
@@ -79,10 +77,8 @@ public class NativeMemoryAllocatorTest {
 
     @Test
     public void checkCapacity() {
-
-        int blockSize = BlocksPool.getInstance().blockSize();
-        int capacity = blockSize * 3;
-        NativeMemoryAllocator ma = new NativeMemoryAllocator(capacity);
+        int capacity = DEFAULT_BLOCK_SIZE_BYTES * 3;
+        NativeMemoryAllocator ma = new NativeMemoryAllocator(capacity, DEFAULT_BLOCK_SIZE_BYTES);
 
         /* simple allocation */
         Slice bb = allocate(ma, 4);
@@ -99,16 +95,16 @@ public class NativeMemoryAllocatorTest {
         Assert.assertEquals(16, ma.getCurrentBlock().allocated());
 
         /* big allocation */
-        Slice bb3 = allocate(ma, blockSize - 8);
-        Assert.assertEquals(blockSize - 8,
+        Slice bb3 = allocate(ma, DEFAULT_BLOCK_SIZE_BYTES - 8);
+        Assert.assertEquals(DEFAULT_BLOCK_SIZE_BYTES - 8,
                 bb3.getAllocatedLength());                                   // check the new ByteBuffer size
-        Assert.assertEquals(blockSize - 8,  // check the new block allocation
+        Assert.assertEquals(DEFAULT_BLOCK_SIZE_BYTES - 8,  // check the new block allocation
                 ma.getCurrentBlock().allocated());
 
         /* complete up to full block allocation */
         Slice bb4 = allocate(ma, 8);
         Assert.assertEquals(8, bb4.getAllocatedLength());              // check the new ByteBuffer size
-        Assert.assertEquals(blockSize,               // check the new block allocation
+        Assert.assertEquals(DEFAULT_BLOCK_SIZE_BYTES,               // check the new block allocation
                 ma.getCurrentBlock().allocated());
 
         /* next small allocation should move us to the next block */
@@ -120,22 +116,11 @@ public class NativeMemoryAllocatorTest {
         ma.close();
     }
 
-    @Before
-    public void init() {
-        BlocksPool.setBlockSize(8 * 1024 * 1024);
-    }
-
-    @After
-    public void tearDown() {
-        BlocksPool.setBlockSize(BlocksPool.DEFAULT_BLOCK_SIZE_BYTES);
-    }
-
     @Test
     public void checkOakCapacity() {
         int initBlocks = BlocksPool.getInstance().numOfRemainingBlocks();
-        int blockSize = BlocksPool.getInstance().blockSize();
-        int capacity = blockSize * 3;
-        NativeMemoryAllocator ma = new NativeMemoryAllocator(capacity);
+        int capacity = DEFAULT_BLOCK_SIZE_BYTES * 3;
+        NativeMemoryAllocator ma = new NativeMemoryAllocator(capacity, DEFAULT_BLOCK_SIZE_BYTES);
         int maxItemsPerChunk = 1024;
 
         // These will be updated on the fly
@@ -281,8 +266,8 @@ public class NativeMemoryAllocatorTest {
 
     @Test
     public void checkFreelistOrdering() {
-        long capacity = 100;
-        NativeMemoryAllocator allocator = new NativeMemoryAllocator(capacity);
+        int capacity = 128;
+        NativeMemoryAllocator allocator = new NativeMemoryAllocator(capacity, capacity);
         allocator.collectStats();
 
         // Order is important here!

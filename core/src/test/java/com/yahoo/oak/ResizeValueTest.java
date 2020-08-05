@@ -114,7 +114,7 @@ public class ResizeValueTest {
 
     @Test
     public void testResizeWithZCGetNewBuffer() {
-        final int blockSize = BlocksPool.getInstance().blockSize();
+        final int blockSize = oak.getMemoryManager().getMaxBlockSize();
 
         StringBuilder stringBuilder = new StringBuilder();
         stringBuilder.setLength((blockSize / Character.BYTES) / 2);

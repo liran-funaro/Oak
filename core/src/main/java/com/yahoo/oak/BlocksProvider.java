@@ -7,9 +7,7 @@
 package com.yahoo.oak;
 
 interface BlocksProvider {
-    int blockSize();
-
-    Block getBlock();
+    Block getBlock(int requiredSize);
 
     void returnBlock(Block block);
 }

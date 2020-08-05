@@ -15,7 +15,7 @@ package com.yahoo.oak;
  */
 public class OakMapBuilder<K, V> {
 
-    private static final long MAX_MEM_CAPACITY = ((long) Integer.MAX_VALUE) * 8; // 16GB per Oak by default
+    private static final long MAX_MEM_CAPACITY = Long.MAX_VALUE; // Technically unlimited
 
     private OakSerializer<K> keySerializer;
     private OakSerializer<V> valueSerializer;
@@ -29,7 +29,8 @@ public class OakMapBuilder<K, V> {
     private int chunkMaxItems;
     private long memoryCapacity;
     private BlockMemoryAllocator memoryAllocator;
-    private Integer preferredBlockSizeBytes;
+    private int minBlockSizeBytes;
+    private int maxBlockSizeBytes;
 
     public OakMapBuilder(OakComparator<K> comparator,
                          OakSerializer<K> keySerializer, OakSerializer<V> valueSerializer, K minKey) {
@@ -42,7 +43,8 @@ public class OakMapBuilder<K, V> {
         this.chunkMaxItems = Chunk.MAX_ITEMS_DEFAULT;
         this.memoryCapacity = MAX_MEM_CAPACITY;
         this.memoryAllocator = null;
-        this.preferredBlockSizeBytes = null;
+        this.minBlockSizeBytes = 1024;
+        this.maxBlockSizeBytes = 256 * (1 << 20);
     }
 
     public OakMapBuilder<K, V> setKeySerializer(OakSerializer<K> keySerializer) {
@@ -81,21 +83,26 @@ public class OakMapBuilder<K, V> {
     }
 
     /**
-     * Sets the preferred block size. This only has an effect if OakMap was never instantiated before.
-     * @param preferredBlockSizeBytes the preferred block size
+     * Sets the minimal block size.
+     * @param minBlockSizeBytes the minimal block size
      */
-    public OakMapBuilder<K, V> setPreferredBlockSize(int preferredBlockSizeBytes) {
-        this.preferredBlockSizeBytes = preferredBlockSizeBytes;
+    public OakMapBuilder<K, V> setMinBlockSize(int minBlockSizeBytes) {
+        this.minBlockSizeBytes = minBlockSizeBytes;
+        return this;
+    }
+
+    /**
+     * Sets the maximal block size.
+     * @param maxBlockSizeBytes the minimal block size
+     */
+    public OakMapBuilder<K, V> setMaxBlockSize(int maxBlockSizeBytes) {
+        this.maxBlockSizeBytes = maxBlockSizeBytes;
         return this;
     }
 
     public OakMap<K, V> build() {
-        if (preferredBlockSizeBytes != null) {
-            BlocksPool.preferBlockSize(preferredBlockSizeBytes);
-        }
-
         if (memoryAllocator == null) {
-            this.memoryAllocator = new NativeMemoryAllocator(memoryCapacity);
+            this.memoryAllocator = new NativeMemoryAllocator(memoryCapacity, minBlockSizeBytes, maxBlockSizeBytes);
         }
 
         MemoryManager memoryManager = new NovaManager(memoryAllocator);

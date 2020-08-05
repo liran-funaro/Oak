@@ -19,9 +19,15 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
     private static final int REUSE_MAX_MULTIPLIER = 2;
     public static final int INVALID_BLOCK_ID = 0;
 
+    // If selecting a huge capacity to this allocator, the blocks array size can be unjustifiably big.
+    // To avoid limiting the size of the block array (and thus the capacity),
+    // we limits its initial (and incremental) allocations.
+    private static final int BLOCKS_ARRAY_MAX_ALLOCATION = 1024;
+
     // mapping IDs to blocks allocated solely to this Allocator
     private Block[] blocksArray;
-    private final AtomicInteger idGenerator = new AtomicInteger(1);
+    // The ID generator is only accesses internally with a lock.
+    private int idGenerator = 1;
 
     /**
      * free list of Slices which can be reused.
@@ -33,36 +39,70 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
     private final BlocksProvider blocksProvider;
     private Block currentBlock;
 
-    // the memory allocation limit for this Allocator
-    // current capacity is set as number of blocks (!) allocated for this OakMap
-    // can be changed to check only according to real allocation (allocated field)
+    // Memory allocation limit for this Allocator
     private final long capacity;
+    private final int minBlockSize;
+    private final int maxBlockSize;
+    private final int maxBlocksArraySize;
 
     // number of bytes allocated for this Oak among different Blocks
     // can be calculated, but kept for easy access
     private final AtomicLong allocated = new AtomicLong(0);
+    private final AtomicLong blockAllocatedBytes = new AtomicLong(0);
     public final AtomicInteger keysAllocated = new AtomicInteger(0);
     public final AtomicInteger valuesAllocated = new AtomicInteger(0);
 
     // flag allowing not to close the same allocator twice
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
+    NativeMemoryAllocator(long capacity) {
+        this(capacity, (int) Math.min(capacity, 256L * (1L << 20)));
+    }
+
+    NativeMemoryAllocator(long capacity, int fixedBlockSize) {
+        this(capacity, fixedBlockSize, fixedBlockSize);
+    }
+
     // constructor
     // input param: memory capacity given to this Oak. Uses default BlocksPool
-    NativeMemoryAllocator(long capacity) {
-        this(capacity, BlocksPool.getInstance());
+    NativeMemoryAllocator(long capacity, int minBlockSize, int maxBlockSize) {
+        this(BlocksPool.getInstance(), capacity, minBlockSize, maxBlockSize);
     }
 
     // A testable constructor
-    NativeMemoryAllocator(long capacity, BlocksProvider blocksProvider) {
+    NativeMemoryAllocator(BlocksProvider blocksProvider, long capacity, int minBlockSize, int maxBlockSize) {
         this.blocksProvider = blocksProvider;
-        int blockArraySize = ((int) (capacity / blocksProvider.blockSize())) + 1;
-        // first entry of blocksArray is always empty
-        this.blocksArray = new Block[blockArraySize + 1];
-        // initially allocate one single block from pool
-        // this may lazy initialize the pool and take time if this is the first call for the pool
-        allocateNewCurrentBlock();
         this.capacity = capacity;
+
+        this.minBlockSize = BlocksPool.ceilingBlockSizePowerOf2(minBlockSize);
+        this.maxBlockSize = BlocksPool.ceilingBlockSizePowerOf2(maxBlockSize);
+
+        if (this.capacity < this.minBlockSize) {
+            throw new IllegalArgumentException(
+                    String.format("Capacity must be greater than the minimal block size " +
+                            "(capacity: %s, minBlockSize: %s)", this.capacity, this.minBlockSize)
+            );
+        }
+
+        // The maximal capacity that can be reached when using only increasing blocks by a factor of 2 that starts
+        // with minBlockSize and ends with maxBlockSize:
+        //        minBlockSize + minBlockSize*2 + minBlockSize*4 + ... + maxBlockSize
+        long maxFactorCapacity = ((long) this.maxBlockSize) * 2L - (long) this.minBlockSize;
+
+        // Number of blocks increasing by a factor of 2 between the minimal and maximal block
+        long blockArraySize = 1 +
+                Integer.numberOfLeadingZeros(this.minBlockSize) - Integer.numberOfLeadingZeros(this.maxBlockSize);
+
+        // It might be needed to add more blocks of the maxBlockSize to reach the capacity
+        if (maxFactorCapacity < capacity) {
+            blockArraySize += ((capacity - maxFactorCapacity) / this.maxBlockSize) + 1;
+        }
+
+        // first entry of blocksArray is always empty
+        blockArraySize += 1;
+
+        this.maxBlocksArraySize = blockArraySize > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) blockArraySize;
+        reallocateBlocksArray();
     }
 
     // Allocates ByteBuffer of the given size, either from freeList or (if it is still possible)
@@ -94,10 +134,6 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
                     stats.reclaim(size);
                 }
                 s.copyFrom(bestFit);
-
-                // We read again the buffer so to get the per-thread buffer.
-                // TODO: This will be redundant once we eliminate the per-thread buffers.
-                readByteBuffer(s);
                 return true;
             }
         }
@@ -108,30 +144,32 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
             try {
                 // The ByteBuffer inside this slice is the thread's ByteBuffer
                 isAllocated = currentBlock.allocate(s, size);
-            } catch (OakOutOfMemoryException e) {
-                // there is no space in current block
-                // may be a buffer bigger than any block is requested?
-                if (size > blocksProvider.blockSize()) {
-                    throw new IllegalArgumentException(
-                            String.format("Cannot allocate larger items than the block size (block size: %s).",
-                                    blocksProvider.blockSize()));
+            } catch (NullPointerException ignored) {
+                synchronized (this) {
+                    if (currentBlock == null) {
+                        allocateNewCurrentBlock(size);
+                    }
                 }
-                // does allocation of new block brings us out of capacity?
-                if ((numberOfBlocks() + 1) * blocksProvider.blockSize() > capacity) {
-                    throw new OakOutOfMemoryException(
-                            String.format("This allocator capacity was exceeded (capacity: %s).", capacity));
+            } catch (OakOutOfMemoryException e) {
+                // There is no space in current block.
+                // Maybe the required size is bigger than any block?
+                if (size > maxBlockSize) {
+                    throw new IllegalArgumentException(
+                            String.format("Cannot allocate larger items than the block size " +
+                                            "(block size: %s, requested: %s).", maxBlockSize, size));
                 } else {
                     // going to allocate additional block (big chunk of memory)
                     // need to be thread-safe, so not many blocks are allocated
                     // locking is actually the most reasonable way of synchronization here
                     synchronized (this) {
                         if (currentBlock.allocated() + size > currentBlock.getCapacity()) {
-                            allocateNewCurrentBlock();
+                            allocateNewCurrentBlock(size);
                         }
                     }
                 }
             }
         }
+
         allocated.addAndGet(size);
         if (allocate == MemoryManager.Allocate.KEY) {
             keysAllocated.incrementAndGet();
@@ -171,7 +209,7 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
         // Reset "closed" to apply a memory barrier before actually returning the block.
         closed.set(true);
 
-        for (int i = 1; i <= numberOfBlocks(); i++) {
+        for (int i = 1; i < idGenerator; i++) {
             blocksProvider.returnBlock(b[i]);
         }
         // no need to do anything with the free list,
@@ -205,6 +243,11 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
         b.readByteBuffer(s);
     }
 
+    @Override
+    public int getMaxBlockSize() {
+        return maxBlockSize;
+    }
+
     // used only for testing
     Block getCurrentBlock() {
         return currentBlock;
@@ -212,20 +255,59 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
 
     // used only for testing
     int numOfAllocatedBlocks() {
-        return (int) numberOfBlocks();
+        return idGenerator - 1;
+    }
+
+    // This method MUST be called within a thread safe context or by the constructor.
+    private void reallocateBlocksArray() {
+        int curSize = blocksArray == null ? 0 : blocksArray.length;
+        int newSize = Math.min(curSize + BLOCKS_ARRAY_MAX_ALLOCATION, maxBlocksArraySize);
+        Block[] newBlocksArray = new Block[newSize];
+
+        if (blocksArray != null) {
+            System.arraycopy(blocksArray, 0, newBlocksArray, 0, blocksArray.length);
+        }
+
+        blocksArray = newBlocksArray;
     }
 
     // This method MUST be called within a thread safe context !!!
-    private void allocateNewCurrentBlock() {
-        Block b = blocksProvider.getBlock();
-        int blockID = idGenerator.getAndIncrement();
+    private void allocateNewCurrentBlock(int requiredSize) {
+        int lastBlockID = numOfAllocatedBlocks();
+        Block lastBlock = blocksArray[lastBlockID];
+        int nextBlockCapacity = lastBlock == null ? minBlockSize :
+                Math.min(maxBlockSize, lastBlock.getCapacity() * BlocksPool.BLOCK_SIZE_BASE);
+        nextBlockCapacity = Math.max(nextBlockCapacity, BlocksPool.ceilingBlockSizePowerOf2(requiredSize));
+        long curAllocatedBytes = blockAllocatedBytes.get();
+
+        if (curAllocatedBytes + nextBlockCapacity > capacity) {
+            nextBlockCapacity = (int) (capacity - curAllocatedBytes);
+
+            // If the required block size to fit the capacity is smaller than the minimal, we can't allocate anymore.
+            if (nextBlockCapacity < minBlockSize) {
+                throw new OakOutOfMemoryException(
+                        String.format("This allocator capacity was exceeded (capacity: %s).", capacity));
+            }
+        }
+
+        Block b = blocksProvider.getBlock(nextBlockCapacity);
+        int blockID = idGenerator++;
+        if (blocksArray.length <= blockID) {
+            reallocateBlocksArray();
+        }
         this.blocksArray[blockID] = b;
         b.setID(blockID);
         this.currentBlock = b;
-    }
+        blockAllocatedBytes.addAndGet(b.getCapacity());
 
-    private long numberOfBlocks() {
-        return idGenerator.get() - 1;
+        // If we have some leftover capacity, keep it in the free list.
+        if (lastBlock != null && lastBlock.allocated() < lastBlock.getCapacity()) {
+            try {
+                Slice s = new Slice();
+                lastBlock.allocate(s, (int) (lastBlock.getCapacity() - lastBlock.allocated()));
+                freeList.add(s);
+            } catch (OakOutOfMemoryException ignored) {}
+        }
     }
 
     private Stats stats = null;

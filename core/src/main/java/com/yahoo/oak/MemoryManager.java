@@ -54,4 +54,7 @@ interface MemoryManager extends Closeable {
      * @return the current version
      */
     int getCurrentVersion();
+
+    // Returns the maximal block size that can be allocated
+    int getMaxBlockSize();
 }
