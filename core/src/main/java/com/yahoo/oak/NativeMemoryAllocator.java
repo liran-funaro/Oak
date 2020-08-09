@@ -87,6 +87,8 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
         long reqBlockArraySize = calculateRequiredBlocksArraySize();
         this.maxBlocksArraySize = reqBlockArraySize > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) reqBlockArraySize;
         this.blocksArray = new Block[Math.min(maxBlocksArraySize, BLOCKS_ARRAY_MAX_ALLOCATION)];
+        this.currentBlock = Block.NULL;
+
     }
 
     private long calculateRequiredBlocksArraySize() {
@@ -113,16 +115,16 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
     // Otherwise, new block is allocated within Oak memory bounds. Thread safe.
     @Override
     public boolean allocate(Slice s, int size, MemoryManager.Allocate allocate) {
-        if (size < 1) {
-            throw new IllegalArgumentException(
-                    String.format("The required allocation must be grater than zero (required: %s).", size));
-        }
-
-        if (size > maxBlockSize) {
-            throw new IllegalArgumentException(
-                    String.format("The required allocation is larger than this allocator's max block size " +
-                            "(max-size: %s, required: %s).", maxBlockSize, size));
-        }
+        // if (size < 1) {
+        //     throw new IllegalArgumentException(
+        //             String.format("The required allocation must be grater than zero (required: %s).", size));
+        // }
+        //
+        // if (size > maxBlockSize) {
+        //     throw new IllegalArgumentException(
+        //             String.format("The required allocation is larger than this allocator's max block size " +
+        //                     "(max-size: %s, required: %s).", maxBlockSize, size));
+        // }
 
         // While the free list is not empty there can be a suitable free slice to reuse.
         // To search a free slice, we use the input slice as a dummy and change its length to the desired length.
@@ -157,20 +159,12 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
         while (!isAllocated) {
             try {
                 isAllocated = currentBlock.allocate(s, size);
-            } catch (NullPointerException ignored) {
-                // We haven't allocated any block yet.
+            } catch (Block.CapacityExceeded ignored) {
+                // We haven't allocated any block yet or there is no space in current block.
                 synchronized (this) {
-                    if (currentBlock == null) {
-                        allocateNewCurrentBlock(size);
-                    }
-                }
-            } catch (OakOutOfMemoryException e) {
-                // There is no space in current block.
-
-                // going to allocate additional block (big chunk of memory)
-                // need to be thread-safe, so not many blocks are allocated
-                // locking is actually the most reasonable way of synchronization here
-                synchronized (this) {
+                    // Going to allocate additional block.
+                    // Need to be thread-safe, so no multiple blocks are allocated simultaneously.
+                    // Locking is actually the most reasonable way of synchronization here
                     if (currentBlock.allocated() + size > currentBlock.getCapacity()) {
                         allocateNewCurrentBlock(size);
                     }

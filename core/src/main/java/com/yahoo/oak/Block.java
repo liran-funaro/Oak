@@ -14,6 +14,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 class Block {
 
+    public static class CapacityExceeded extends Exception {
+        CapacityExceeded(int capacity) {
+            super(String.format("This block capacity was exceeded (capacity: %s).", capacity));
+        }
+    }
+
+    public static final Block NULL = new Block(0, null);
+
     private final ByteBuffer buffer;
 
     private final int capacity;
@@ -21,12 +29,14 @@ class Block {
     private int id; // placeholder might need to be set in the future
 
     Block(int capacity) {
-        assert capacity > 0;
-        this.capacity = capacity;
-        this.id = NativeMemoryAllocator.INVALID_BLOCK_ID;
         // Pay attention in allocateDirect the data is *zero'd out*
         // which has an overhead in clearing and you end up touching every page
-        this.buffer = ByteBuffer.allocateDirect(this.capacity);
+        this(capacity, ByteBuffer.allocateDirect(capacity));
+    }
+
+    Block(int capacity, ByteBuffer buffer) {
+        this.capacity = capacity;
+        this.buffer = buffer;
     }
 
     void setID(int id) {
@@ -35,12 +45,11 @@ class Block {
 
     // Block manages its linear allocation. Thread safe.
     // The returned buffer doesn't have all zero bytes.
-    boolean allocate(Slice s, int size) {
+    boolean allocate(Slice s, int size) throws CapacityExceeded {
         int now = allocated.getAndAdd(size);
         if (now + size > this.capacity) {
             allocated.getAndAdd(-size);
-            throw new OakOutOfMemoryException(
-                    String.format("This block capacity was exceeded (capacity: %s).", capacity));
+            throw new CapacityExceeded(capacity);
         }
         s.update(id, now, size);
         readByteBuffer(s);
@@ -86,5 +95,4 @@ class Block {
     public int getCapacity() {
         return capacity;
     }
-
 }
