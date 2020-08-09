@@ -84,6 +84,12 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
             );
         }
 
+        long reqBlockArraySize = calculateRequiredBlocksArraySize();
+        this.maxBlocksArraySize = reqBlockArraySize > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) reqBlockArraySize;
+        this.blocksArray = new Block[Math.min(maxBlocksArraySize, BLOCKS_ARRAY_MAX_ALLOCATION)];
+    }
+
+    private long calculateRequiredBlocksArraySize() {
         // The maximal capacity that can be reached when using only increasing blocks by a factor of 2 that starts
         // with minBlockSize and ends with maxBlockSize:
         //        minBlockSize + minBlockSize*2 + minBlockSize*4 + ... + maxBlockSize
@@ -99,10 +105,7 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
         }
 
         // first entry of blocksArray is always empty
-        blockArraySize += 1;
-
-        this.maxBlocksArraySize = blockArraySize > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) blockArraySize;
-        reallocateBlocksArray();
+        return blockArraySize + 1;
     }
 
     // Allocates ByteBuffer of the given size, either from freeList or (if it is still possible)
@@ -110,6 +113,17 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
     // Otherwise, new block is allocated within Oak memory bounds. Thread safe.
     @Override
     public boolean allocate(Slice s, int size, MemoryManager.Allocate allocate) {
+        if (size < 1) {
+            throw new IllegalArgumentException(
+                    String.format("The required allocation must be grater than zero (required: %s).", size));
+        }
+
+        if (size > maxBlockSize) {
+            throw new IllegalArgumentException(
+                    String.format("The required allocation is larger than this allocator's max block size " +
+                            "(max-size: %s, required: %s).", maxBlockSize, size));
+        }
+
         // While the free list is not empty there can be a suitable free slice to reuse.
         // To search a free slice, we use the input slice as a dummy and change its length to the desired length.
         // Then, we use freeList.higher(s) which returns a free slice with greater or equal length to the length of the
@@ -142,9 +156,9 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
         // freeList is empty or there is no suitable slice
         while (!isAllocated) {
             try {
-                // The ByteBuffer inside this slice is the thread's ByteBuffer
                 isAllocated = currentBlock.allocate(s, size);
             } catch (NullPointerException ignored) {
+                // We haven't allocated any block yet.
                 synchronized (this) {
                     if (currentBlock == null) {
                         allocateNewCurrentBlock(size);
@@ -152,19 +166,13 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
                 }
             } catch (OakOutOfMemoryException e) {
                 // There is no space in current block.
-                // Maybe the required size is bigger than any block?
-                if (size > maxBlockSize) {
-                    throw new IllegalArgumentException(
-                            String.format("Cannot allocate larger items than the block size " +
-                                            "(block size: %s, requested: %s).", maxBlockSize, size));
-                } else {
-                    // going to allocate additional block (big chunk of memory)
-                    // need to be thread-safe, so not many blocks are allocated
-                    // locking is actually the most reasonable way of synchronization here
-                    synchronized (this) {
-                        if (currentBlock.allocated() + size > currentBlock.getCapacity()) {
-                            allocateNewCurrentBlock(size);
-                        }
+
+                // going to allocate additional block (big chunk of memory)
+                // need to be thread-safe, so not many blocks are allocated
+                // locking is actually the most reasonable way of synchronization here
+                synchronized (this) {
+                    if (currentBlock.allocated() + size > currentBlock.getCapacity()) {
+                        allocateNewCurrentBlock(size);
                     }
                 }
             }
@@ -258,21 +266,19 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
         return idGenerator - 1;
     }
 
-    // This method MUST be called within a thread safe context or by the constructor.
+    // This method MUST be called within a thread safe context.
     private void reallocateBlocksArray() {
-        int curSize = blocksArray == null ? 0 : blocksArray.length;
-        int newSize = Math.min(curSize + BLOCKS_ARRAY_MAX_ALLOCATION, maxBlocksArraySize);
+        int newSize = Math.min(blocksArray.length + BLOCKS_ARRAY_MAX_ALLOCATION, maxBlocksArraySize);
         Block[] newBlocksArray = new Block[newSize];
-
-        if (blocksArray != null) {
-            System.arraycopy(blocksArray, 0, newBlocksArray, 0, blocksArray.length);
-        }
-
+        System.arraycopy(blocksArray, 0, newBlocksArray, 0, blocksArray.length);
         blocksArray = newBlocksArray;
     }
 
-    // This method MUST be called within a thread safe context !!!
+    // This method MUST be called within a thread safe context.
+    //
     private void allocateNewCurrentBlock(int requiredSize) {
+        assert requiredSize <= maxBlockSize : "The caller must validate the required size.";
+
         int lastBlockID = numOfAllocatedBlocks();
         Block lastBlock = blocksArray[lastBlockID];
         int nextBlockCapacity = lastBlock == null ? minBlockSize :
@@ -301,13 +307,13 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
         blockAllocatedBytes.addAndGet(b.getCapacity());
 
         // If we have some leftover capacity, keep it in the free list.
-        if (lastBlock != null && lastBlock.allocated() < lastBlock.getCapacity()) {
-            try {
-                Slice s = new Slice();
-                lastBlock.allocate(s, (int) (lastBlock.getCapacity() - lastBlock.allocated()));
-                freeList.add(s);
-            } catch (OakOutOfMemoryException ignored) {}
-        }
+        // if (lastBlock != null && lastBlock.allocated() < lastBlock.getCapacity()) {
+        //     try {
+        //         Slice s = new Slice();
+        //         lastBlock.allocate(s, (int) (lastBlock.getCapacity() - lastBlock.allocated()));
+        //         freeList.add(s);
+        //     } catch (OakOutOfMemoryException ignored) {}
+        // }
     }
 
     private Stats stats = null;
