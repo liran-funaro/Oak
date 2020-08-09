@@ -25,7 +25,6 @@ public class OffHeapList<K extends MyBuffer, V extends MyBuffer> implements Comp
     private Comparator<Object> comparator;
     private static final long KB = 1024L;
     private static final long GB = KB * KB * KB;
-    private static final long OAK_MAX_OFF_MEMORY = 256 * GB;
 
     public OffHeapList() {
 
@@ -72,7 +71,7 @@ public class OffHeapList<K extends MyBuffer, V extends MyBuffer> implements Comp
         };
 
         skipListMap = new ConcurrentSkipListMap<>(comparator);
-        allocator = new NativeMemoryAllocator(OAK_MAX_OFF_MEMORY);
+        allocator = new NativeMemoryAllocator();
     }
 
     @Override

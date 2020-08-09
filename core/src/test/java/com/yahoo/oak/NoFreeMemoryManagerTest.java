@@ -18,7 +18,7 @@ public class NoFreeMemoryManagerTest {
 
     @Before
     public void setUp() {
-        BlockMemoryAllocator keysMemoryAllocator = new NativeMemoryAllocator(128, 128);
+        BlockMemoryAllocator keysMemoryAllocator = new NativeMemoryAllocator(128L, 128);
         noFreeMemoryManager = new NoFreeMemoryManager(keysMemoryAllocator);
     }
 

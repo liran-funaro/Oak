@@ -18,11 +18,13 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
     // This parameter may be tuned for performance vs off-heap memory utilization
     private static final int REUSE_MAX_MULTIPLIER = 2;
     public static final int INVALID_BLOCK_ID = 0;
+    public static final int DEFAULT_MIN_BLOCK_SIZE = 1024;
+    public static final int DEFAULT_MAX_BLOCK_SIZE = 256 * (1 << 20);
 
     // If selecting a huge capacity to this allocator, the blocks array size can be unjustifiably big.
     // To avoid limiting the size of the block array (and thus the capacity),
     // we limits its initial (and incremental) allocations.
-    private static final int BLOCKS_ARRAY_MAX_ALLOCATION = 1024;
+    private static final int BLOCKS_ARRAY_MAX_ALLOCATION = 128;
 
     // mapping IDs to blocks allocated solely to this Allocator
     private Block[] blocksArray;
@@ -40,10 +42,12 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
     private Block currentBlock;
 
     // Memory allocation limit for this Allocator
-    private final long capacity;
+    private final Long capacity;
     private final int minBlockSize;
     private final int maxBlockSize;
     private final int maxBlocksArraySize;
+
+    private int nextBlockSize;
 
     // number of bytes allocated for this Oak among different Blocks
     // can be calculated, but kept for easy access
@@ -55,55 +59,121 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
     // flag allowing not to close the same allocator twice
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
-    NativeMemoryAllocator(long capacity) {
-        this(capacity, (int) Math.min(capacity, 256L * (1L << 20)));
+    NativeMemoryAllocator() {
+        this(null, null, null);
     }
 
-    NativeMemoryAllocator(long capacity, int fixedBlockSize) {
+    NativeMemoryAllocator(Long capacity) {
+        this(capacity, null, null);
+    }
+
+    NativeMemoryAllocator(Long capacity, Integer fixedBlockSize) {
         this(capacity, fixedBlockSize, fixedBlockSize);
     }
 
     // constructor
     // input param: memory capacity given to this Oak. Uses default BlocksPool
-    NativeMemoryAllocator(long capacity, int minBlockSize, int maxBlockSize) {
+    NativeMemoryAllocator(Long capacity, Integer minBlockSize, Integer maxBlockSize) {
         this(BlocksPool.getInstance(), capacity, minBlockSize, maxBlockSize);
     }
 
     // A testable constructor
-    NativeMemoryAllocator(BlocksProvider blocksProvider, long capacity, int minBlockSize, int maxBlockSize) {
+    NativeMemoryAllocator(BlocksProvider blocksProvider, Long capacity, Integer minBlockSize, Integer maxBlockSize) {
         this.blocksProvider = blocksProvider;
         this.capacity = capacity;
 
-        this.minBlockSize = BlocksPool.ceilingBlockSizePowerOf2(minBlockSize);
-        this.maxBlockSize = BlocksPool.ceilingBlockSizePowerOf2(maxBlockSize);
+        int selectedMinBlockSize = DEFAULT_MIN_BLOCK_SIZE;
+        int selectedMaxBlockSize = DEFAULT_MAX_BLOCK_SIZE;
 
-        if (this.capacity < this.minBlockSize) {
-            throw new IllegalArgumentException(
-                    String.format("Capacity must be greater than the minimal block size " +
-                            "(capacity: %s, minBlockSize: %s)", this.capacity, this.minBlockSize)
-            );
+        long reqBlockArraySize = Integer.MAX_VALUE;
+
+        // If min block size was provided, validate and round it.
+        if (minBlockSize != null) {
+            BlocksPool.validateBlockSize(minBlockSize);
+            selectedMinBlockSize = BlocksPool.ceilingBlockSizePowerOf2(minBlockSize);
         }
 
-        long reqBlockArraySize = calculateRequiredBlocksArraySize();
-        this.maxBlocksArraySize = reqBlockArraySize > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) reqBlockArraySize;
+        // If max block size was provided, validate and round it.
+        if (maxBlockSize != null) {
+            BlocksPool.validateBlockSize(maxBlockSize);
+            selectedMaxBlockSize = BlocksPool.ceilingBlockSizePowerOf2(maxBlockSize);
+        }
+
+        // If capacity was provided, validate it.
+        if (capacity != null) {
+            if (capacity < 1) {
+                throw new IllegalArgumentException(
+                        String.format("The requested capacity must be greater than 1 " +
+                                "(capacity: %s)", capacity)
+                );
+            }
+
+            // If min-block-size was provided, then it must be grater than or equal to the capacity.
+            if (minBlockSize != null && capacity < minBlockSize) {
+                throw new IllegalArgumentException(
+                        String.format("The requested capacity must be greater than the minimal block size " +
+                                "(capacity: %s, minBlockSize: %s)", capacity, minBlockSize)
+                );
+            }
+
+            // If min-block-size was not provided, then we can select it to fit our provided capacity.
+            if (minBlockSize == null && capacity < selectedMinBlockSize) {
+                selectedMinBlockSize = BlocksPool.ceilingBlockSizePowerOf2(capacity.intValue()) / 2;
+            }
+
+            // If capacity was set, we have to make sure that the provided block limits can attain this capacity.
+            reqBlockArraySize = calculateRequiredBlocksArraySize(capacity, selectedMinBlockSize, selectedMaxBlockSize);
+
+            // If not provided upper limit for the block size, then try larger blocks to fit the required capacity.
+            if (maxBlockSize == null) {
+                while (reqBlockArraySize > Integer.MAX_VALUE && selectedMaxBlockSize < Block.MAX_BLOCK_SIZE) {
+                    selectedMaxBlockSize *= 2;
+                    reqBlockArraySize = calculateRequiredBlocksArraySize(capacity,
+                            selectedMinBlockSize, selectedMaxBlockSize);
+                }
+            }
+
+            // If not provided lower limit for the block size, then try larger blocks to fit the required capacity.
+            if (minBlockSize == null) {
+                while (reqBlockArraySize > Integer.MAX_VALUE && selectedMinBlockSize < Block.MAX_BLOCK_SIZE) {
+                    selectedMinBlockSize *= 2;
+                    reqBlockArraySize = calculateRequiredBlocksArraySize(capacity,
+                            selectedMinBlockSize, selectedMaxBlockSize);
+                }
+            }
+
+            // If we couldn't find block limits to attain this capacity, then we should alert the user.
+            if (reqBlockArraySize > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException(
+                        String.format("The requested capacity is unattainable with the provided block size limits " +
+                                "(capacity: %s, min-block-size: %s, max-block-size: %s)",
+                                capacity, minBlockSize, maxBlockSize)
+                );
+            }
+        }
+
+        this.minBlockSize = selectedMinBlockSize;
+        this.maxBlockSize = selectedMaxBlockSize;
+        this.maxBlocksArraySize = (int) reqBlockArraySize;
+
         this.blocksArray = new Block[Math.min(maxBlocksArraySize, BLOCKS_ARRAY_MAX_ALLOCATION)];
         this.currentBlock = Block.NULL;
-
+        this.nextBlockSize = this.minBlockSize;
     }
 
-    private long calculateRequiredBlocksArraySize() {
+    private static long calculateRequiredBlocksArraySize(long capacity, int minBlockSize, int maxBlockSize) {
         // The maximal capacity that can be reached when using only increasing blocks by a factor of 2 that starts
         // with minBlockSize and ends with maxBlockSize:
         //        minBlockSize + minBlockSize*2 + minBlockSize*4 + ... + maxBlockSize
-        long maxFactorCapacity = ((long) this.maxBlockSize) * 2L - (long) this.minBlockSize;
+        long maxFactorCapacity = ((long) maxBlockSize) * 2L - (long) minBlockSize;
 
         // Number of blocks increasing by a factor of 2 between the minimal and maximal block
         long blockArraySize = 1 +
-                Integer.numberOfLeadingZeros(this.minBlockSize) - Integer.numberOfLeadingZeros(this.maxBlockSize);
+                Integer.numberOfLeadingZeros(minBlockSize) - Integer.numberOfLeadingZeros(maxBlockSize);
 
         // It might be needed to add more blocks of the maxBlockSize to reach the capacity
         if (maxFactorCapacity < capacity) {
-            blockArraySize += ((capacity - maxFactorCapacity) / this.maxBlockSize) + 1;
+            blockArraySize += ((capacity - maxFactorCapacity) / maxBlockSize) + 1;
         }
 
         // first entry of blocksArray is always empty
@@ -115,17 +185,6 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
     // Otherwise, new block is allocated within Oak memory bounds. Thread safe.
     @Override
     public boolean allocate(Slice s, int size, MemoryManager.Allocate allocate) {
-        // if (size < 1) {
-        //     throw new IllegalArgumentException(
-        //             String.format("The required allocation must be grater than zero (required: %s).", size));
-        // }
-        //
-        // if (size > maxBlockSize) {
-        //     throw new IllegalArgumentException(
-        //             String.format("The required allocation is larger than this allocator's max block size " +
-        //                     "(max-size: %s, required: %s).", maxBlockSize, size));
-        // }
-
         // While the free list is not empty there can be a suitable free slice to reuse.
         // To search a free slice, we use the input slice as a dummy and change its length to the desired length.
         // Then, we use freeList.higher(s) which returns a free slice with greater or equal length to the length of the
@@ -161,6 +220,14 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
                 isAllocated = currentBlock.allocate(s, size);
             } catch (Block.CapacityExceeded ignored) {
                 // We haven't allocated any block yet or there is no space in current block.
+
+                // First, lets check that we can allocate this size
+                if (size < 1 || size > maxBlockSize) {
+                    throw new IllegalArgumentException(
+                            String.format("The required allocation must be between 1 to the max block size " +
+                                    "(required: %s, max-block-size: %s).", size, maxBlockSize));
+                }
+
                 synchronized (this) {
                     // Going to allocate additional block.
                     // Need to be thread-safe, so no multiple blocks are allocated simultaneously.
@@ -268,29 +335,39 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
         blocksArray = newBlocksArray;
     }
 
+    private void validateCapacity(int requiredSize) {
+        if (capacity == null) {
+            return;
+        }
+
+        long remainingCapacity = capacity - blockAllocatedBytes.get();
+        if (remainingCapacity >= nextBlockSize) {
+            return;
+        }
+
+        // We don't have enough capacity for the next block size.
+        // Lets select the minimal block size that could fit.
+        nextBlockSize = Math.max(minBlockSize, BlocksPool.ceilingBlockSizePowerOf2(requiredSize));
+
+        // If the remaining capacity is smaller than the required, we can't allocate anymore.
+        if (remainingCapacity < nextBlockSize) {
+            throw new OakOutOfMemoryException(
+                    String.format("This allocator capacity was exceeded (capacity: %s).", capacity));
+        }
+    }
+
     // This method MUST be called within a thread safe context.
-    //
+    // Its caller must validate that the required size is valid.
     private void allocateNewCurrentBlock(int requiredSize) {
         assert requiredSize <= maxBlockSize : "The caller must validate the required size.";
 
-        int lastBlockID = numOfAllocatedBlocks();
-        Block lastBlock = blocksArray[lastBlockID];
-        int nextBlockCapacity = lastBlock == null ? minBlockSize :
-                Math.min(maxBlockSize, lastBlock.getCapacity() * BlocksPool.BLOCK_SIZE_BASE);
-        nextBlockCapacity = Math.max(nextBlockCapacity, BlocksPool.ceilingBlockSizePowerOf2(requiredSize));
-        long curAllocatedBytes = blockAllocatedBytes.get();
-
-        if (curAllocatedBytes + nextBlockCapacity > capacity) {
-            nextBlockCapacity = (int) (capacity - curAllocatedBytes);
-
-            // If the required block size to fit the capacity is smaller than the minimal, we can't allocate anymore.
-            if (nextBlockCapacity < minBlockSize) {
-                throw new OakOutOfMemoryException(
-                        String.format("This allocator capacity was exceeded (capacity: %s).", capacity));
-            }
+        if (nextBlockSize < requiredSize) {
+            nextBlockSize = BlocksPool.ceilingBlockSizePowerOf2(requiredSize);
         }
 
-        Block b = blocksProvider.getBlock(nextBlockCapacity);
+        validateCapacity(requiredSize);
+
+        Block b = blocksProvider.getBlock(nextBlockSize);
         int blockID = idGenerator++;
         if (blocksArray.length <= blockID) {
             reallocateBlocksArray();
@@ -299,6 +376,8 @@ class NativeMemoryAllocator implements BlockMemoryAllocator {
         b.setID(blockID);
         this.currentBlock = b;
         blockAllocatedBytes.addAndGet(b.getCapacity());
+
+        nextBlockSize = Math.min(maxBlockSize, nextBlockSize * BlocksPool.BLOCK_SIZE_BASE);
 
         // If we have some leftover capacity, keep it in the free list.
         // if (lastBlock != null && lastBlock.allocated() < lastBlock.getCapacity()) {

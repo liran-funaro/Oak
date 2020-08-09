@@ -15,8 +15,6 @@ package com.yahoo.oak;
  */
 public class OakMapBuilder<K, V> {
 
-    private static final long MAX_MEM_CAPACITY = Long.MAX_VALUE; // Technically unlimited
-
     private OakSerializer<K> keySerializer;
     private OakSerializer<V> valueSerializer;
 
@@ -27,10 +25,10 @@ public class OakMapBuilder<K, V> {
 
     // Off-heap fields
     private int chunkMaxItems;
-    private long memoryCapacity;
+    private Long memoryCapacity;
     private BlockMemoryAllocator memoryAllocator;
-    private int minBlockSizeBytes;
-    private int maxBlockSizeBytes;
+    private Integer minBlockSizeBytes;
+    private Integer maxBlockSizeBytes;
 
     public OakMapBuilder(OakComparator<K> comparator,
                          OakSerializer<K> keySerializer, OakSerializer<V> valueSerializer, K minKey) {
@@ -41,10 +39,10 @@ public class OakMapBuilder<K, V> {
         this.comparator = comparator;
 
         this.chunkMaxItems = Chunk.MAX_ITEMS_DEFAULT;
-        this.memoryCapacity = MAX_MEM_CAPACITY;
+        this.memoryCapacity = null;
         this.memoryAllocator = null;
-        this.minBlockSizeBytes = 1024;
-        this.maxBlockSizeBytes = 256 * (1 << 20);
+        this.minBlockSizeBytes = null;
+        this.maxBlockSizeBytes = null;
     }
 
     public OakMapBuilder<K, V> setKeySerializer(OakSerializer<K> keySerializer) {

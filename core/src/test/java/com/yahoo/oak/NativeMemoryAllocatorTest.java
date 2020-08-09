@@ -41,7 +41,7 @@ public class NativeMemoryAllocatorTest {
     @Test
     public void allocateContention() throws InterruptedException {
         Random random = new Random();
-        long capacity = 128;
+        int capacity = 128;
         int blockSize = 8;
         int buffersPerBlock = 2;
         List<Block> blocks = Collections.synchronizedList(new ArrayList<>());
@@ -54,7 +54,8 @@ public class NativeMemoryAllocatorTest {
             blocks.add(newBlock);
             return newBlock;
         });
-        NativeMemoryAllocator allocator = new NativeMemoryAllocator(mockProvider, capacity, blockSize, blockSize);
+        NativeMemoryAllocator allocator = new NativeMemoryAllocator(mockProvider,
+                (long) capacity, blockSize, blockSize);
 
         int numAllocators = 10;
         ArrayList<Thread> threads = new ArrayList<>();
@@ -78,7 +79,7 @@ public class NativeMemoryAllocatorTest {
     @Test
     public void checkCapacity() {
         int capacity = DEFAULT_BLOCK_SIZE_BYTES * 3;
-        NativeMemoryAllocator ma = new NativeMemoryAllocator(capacity, DEFAULT_BLOCK_SIZE_BYTES);
+        NativeMemoryAllocator ma = new NativeMemoryAllocator((long) capacity, DEFAULT_BLOCK_SIZE_BYTES);
 
         /* simple allocation */
         Slice bb = allocate(ma, 4);
@@ -120,7 +121,7 @@ public class NativeMemoryAllocatorTest {
     public void checkOakCapacity() {
         int initBlocks = BlocksPool.getInstance().numOfRemainingBlocks();
         int capacity = DEFAULT_BLOCK_SIZE_BYTES * 3;
-        NativeMemoryAllocator ma = new NativeMemoryAllocator(capacity, DEFAULT_BLOCK_SIZE_BYTES);
+        NativeMemoryAllocator ma = new NativeMemoryAllocator((long) capacity, DEFAULT_BLOCK_SIZE_BYTES);
         int maxItemsPerChunk = 1024;
 
         // These will be updated on the fly
@@ -267,7 +268,7 @@ public class NativeMemoryAllocatorTest {
     @Test
     public void checkFreelistOrdering() {
         int capacity = 128;
-        NativeMemoryAllocator allocator = new NativeMemoryAllocator(capacity, capacity);
+        NativeMemoryAllocator allocator = new NativeMemoryAllocator((long) capacity, capacity);
         allocator.collectStats();
 
         // Order is important here!

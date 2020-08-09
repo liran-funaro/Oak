@@ -13,7 +13,7 @@ public class NovaManagerTest {
 
     @Test
     public void reuseTest() {
-        final NativeMemoryAllocator allocator = new NativeMemoryAllocator(8 * (1 << 20));
+        final NativeMemoryAllocator allocator = new NativeMemoryAllocator(8L * (1 << 20));
         NovaManager novaManager = new NovaManager(allocator);
         long oldVersion = novaManager.getCurrentVersion();
         Slice[] allocatedSlices = new Slice[NovaManager.RELEASE_LIST_LIMIT];

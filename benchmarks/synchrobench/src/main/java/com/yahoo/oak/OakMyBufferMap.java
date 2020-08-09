@@ -18,7 +18,6 @@ public class OakMyBufferMap<K extends MyBuffer, V extends MyBuffer> implements C
     private NativeMemoryAllocator ma;
     private static final long KB = 1024L;
     private static final long GB = KB * KB * KB;
-    private static final long OAK_MAX_OFF_MEMORY = 256 * GB;
 
     public OakMyBufferMap() {
         clear();
@@ -30,7 +29,7 @@ public class OakMyBufferMap<K extends MyBuffer, V extends MyBuffer> implements C
             oak.close();
         }
 
-        ma = new NativeMemoryAllocator(OAK_MAX_OFF_MEMORY, 1024, 256 * (1 << 20));
+        ma = new NativeMemoryAllocator();
         if (Parameters.detailedStats) {
             ma.collectStats();
         }

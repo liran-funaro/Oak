@@ -24,12 +24,6 @@ final class BlocksPool implements BlocksProvider, Closeable {
     // Blocks can only be allocated as a power of two.
     public static final int BLOCK_SIZE_BASE = 2;
 
-    // Anything lower than 1 byte is meaningless
-    static final int MIN_BLOCK_SIZE = 1;
-
-    // Integer is limited to 32 bits; one bit is for sign.
-    static final int MAX_BLOCK_SIZE = 1 << (Integer.SIZE - 2);
-
     static final long GB = 1L << 30;
 
     // TODO change the following constants to be configurable
@@ -85,26 +79,31 @@ final class BlocksPool implements BlocksProvider, Closeable {
      * @return the ceiling power of 2.
      */
     public static int ceilingBlockSizePowerOf2(final int n) {
-        validateBlockSize(n);
         return Integer.highestOneBit((n - 1) << 1);
     }
 
     public static void validateBlockSize(final int n) {
-        if (n < MIN_BLOCK_SIZE || n > MAX_BLOCK_SIZE) {
-            throw new IllegalArgumentException(String.format("Illegal block size: %s", n));
+        if (n < Block.MIN_BLOCK_SIZE || n > Block.MAX_BLOCK_SIZE) {
+            throw new IllegalArgumentException(
+                    String.format("Illegal block size (out of limits: %s-%s): %s",
+                            Block.MIN_BLOCK_SIZE, Block.MAX_BLOCK_SIZE, n));
         }
     }
 
     /**
      * Returns a single Block from within the Pool, enlarges the Pool if needed
-     * Thread-safe
+     * Thread-safe.
+     * The caller must validate that the requested size is within the block limits and is a power of two.
      */
     @Override
     public Block getBlock(int requiredSize) {
-        int allocatedSize = ceilingBlockSizePowerOf2(requiredSize);
+        // Validate that this block pool is always requested valid block sizes
+        assert requiredSize >= Block.MIN_BLOCK_SIZE && requiredSize <= Block.MAX_BLOCK_SIZE;
+        assert requiredSize == ceilingBlockSizePowerOf2(requiredSize);
+
         // poolNum is a number between 0 to 31 due to the limitation of Integer.
         // 0 corresponds to the largest block size, and 31 to the smallest.
-        int poolNum = Integer.numberOfLeadingZeros(allocatedSize);
+        int poolNum = Integer.numberOfLeadingZeros(requiredSize);
         ConcurrentLinkedQueue<Block> pool = blockPools[poolNum];
 
         Block b = pool.poll();
@@ -113,8 +112,8 @@ final class BlocksPool implements BlocksProvider, Closeable {
         } else {
             // The blocks are allocated without ids.
             // They are given an id when they are given to an OakNativeMemoryAllocator.
-            b = new Block(allocatedSize);
-            allocatedBytes.addAndGet(allocatedSize);
+            b = new Block(requiredSize);
+            allocatedBytes.addAndGet(requiredSize);
         }
         return b;
     }

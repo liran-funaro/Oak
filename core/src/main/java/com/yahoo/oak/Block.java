@@ -14,13 +14,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 class Block {
 
+    // Anything lower than 1 byte is meaningless
+    static final int MIN_BLOCK_SIZE = 1;
+    // Integer is limited to 32 bits; one bit is for sign.
+    static final int MAX_BLOCK_SIZE = 1 << (Integer.SIZE - 2);
+
     public static class CapacityExceeded extends Exception {
         CapacityExceeded(int capacity) {
             super(String.format("This block capacity was exceeded (capacity: %s).", capacity));
         }
     }
 
-    public static final Block NULL = new Block(0, null);
+    public static final Block NULL = new Block();
 
     private final ByteBuffer buffer;
 
@@ -29,14 +34,19 @@ class Block {
     private int id; // placeholder might need to be set in the future
 
     Block(int capacity) {
+        assert capacity > 0;
+        this.capacity = capacity;
+        this.id = NativeMemoryAllocator.INVALID_BLOCK_ID;
         // Pay attention in allocateDirect the data is *zero'd out*
         // which has an overhead in clearing and you end up touching every page
-        this(capacity, ByteBuffer.allocateDirect(capacity));
+        this.buffer = ByteBuffer.allocateDirect(this.capacity);
     }
 
-    Block(int capacity, ByteBuffer buffer) {
-        this.capacity = capacity;
-        this.buffer = buffer;
+    // Only used to instantiate a null block
+    private Block() {
+        this.capacity = 0;
+        this.id = NativeMemoryAllocator.INVALID_BLOCK_ID;
+        this.buffer = null;
     }
 
     void setID(int id) {
@@ -69,6 +79,10 @@ class Block {
 
     // releasing the memory back to the OS, freeing the block, an opposite of allocation, not thread safe
     void clean() {
+        if (buffer == null) {
+            return;
+        }
+
         Field cleanerField = null;
         try {
             cleanerField = buffer.getClass().getDeclaredField("cleaner");

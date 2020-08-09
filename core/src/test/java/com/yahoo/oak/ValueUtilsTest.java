@@ -22,7 +22,7 @@ public class ValueUtilsTest {
 
     @Before
     public void init() {
-        novaManager = new NovaManager(new NativeMemoryAllocator(128));
+        novaManager = new NovaManager(new NativeMemoryAllocator(128L));
         ctx = new ThreadContext(valueOperator);
         s = ctx.value;
         novaManager.allocate(s, 20, MemoryManager.Allocate.VALUE);
