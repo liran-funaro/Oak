@@ -171,6 +171,9 @@ final class BlocksPool implements BlocksProvider, Closeable {
                 pool.poll().clean();
             }
         }
+
+        cachedBytes.set(0);
+        allocatedBytes.set(0);
     }
 
     // used only for testing
