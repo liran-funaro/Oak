@@ -20,8 +20,11 @@ class Block {
     static final int MAX_BLOCK_SIZE = 1 << (Integer.SIZE - 2);
 
     public static class CapacityExceeded extends Exception {
+        public final int capacity;
+
         CapacityExceeded(int capacity) {
-            super(String.format("This block capacity was exceeded (capacity: %s).", capacity));
+            super();
+            this.capacity = capacity;
         }
     }
 
@@ -34,7 +37,8 @@ class Block {
     private int id; // placeholder might need to be set in the future
 
     Block(int capacity) {
-        assert capacity > 0;
+        assert capacity >= MIN_BLOCK_SIZE;
+        assert capacity <= MAX_BLOCK_SIZE;
         this.capacity = capacity;
         this.id = NativeMemoryAllocator.INVALID_BLOCK_ID;
         // Pay attention in allocateDirect the data is *zero'd out*
